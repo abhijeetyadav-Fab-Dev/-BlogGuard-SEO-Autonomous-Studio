@@ -409,7 +409,7 @@ def audit_page(data, keyword=None, writer=None):
     else:
         content_score += 14
         if reading_ease < 50:
-            jargon_ex = ", ".join([f"'{item['Jargon Word']}' ➔ '{item['Simpler Alternative']}'" for item in detected_jargon[:4]])
+            jargon_ex = ", ".join([f"'{item['Jargon Word']}' -> '{item['Simpler Alternative']}'" for item in detected_jargon[:4]])
             fix_text = "Break sentences over 20 words into 2 punchy sentences. "
             if jargon_ex:
                 fix_text += f"Replace complex terms: {jargon_ex}."
@@ -455,12 +455,12 @@ def audit_page(data, keyword=None, writer=None):
             "pillar": "Readability",
             "title": f"Excessive Passive Voice ({passive_info['percentage']}%)",
             "detail": f"{passive_info['count']} sentences use passive voice constructions. Passive voice slows reader comprehension and weakens authority.",
-            "fix": "Rewrite passive sentences in active voice (e.g. 'The report was compiled by our team' ➔ 'Our team compiled the report')."
+            "fix": "Rewrite passive sentences in active voice (e.g. 'The report was compiled by our team' -> 'Our team compiled the report')."
         })
 
     # Redundancies / Wordiness warning
     if len(redundancies_info) > 0:
-        red_examples = ", ".join([f"'{r['Redundant Phrase']}' ➔ '{r['Simpler Alternative']}'" for r in redundancies_info[:3]])
+        red_examples = ", ".join([f"'{r['Redundant Phrase']}' -> '{r['Simpler Alternative']}'" for r in redundancies_info[:3]])
         issues.append({
             "severity": "info",
             "pillar": "Readability",
@@ -890,7 +890,7 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
                 for typo, fix in typo_map.items():
                     s_escaped = re.sub(
                         rf"\b({re.escape(typo)})\b",
-                        rf'<span class="hl-typo" title="Spelling Typo: Change to \'{fix}\'">\1 <small class="fix-tag">[➔ {fix}]</small></span>',
+                        rf'<span class="hl-typo" title="Spelling Typo: Change to \'{fix}\'">\1 <small class="fix-tag">[&rarr; {fix}]</small></span>',
                         s_escaped,
                         flags=re.IGNORECASE
                     )
@@ -900,7 +900,7 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
                 for red, sim in COMMON_REDUNDANCIES.items():
                     s_escaped = re.sub(
                         rf"\b({re.escape(red)})\b",
-                        rf'<span class="hl-redundant" title="Wordy/Redundant: Simplify to \'{sim}\'">\1 <small class="red-tag">[➔ {sim}]</small></span>',
+                        rf'<span class="hl-redundant" title="Wordy/Redundant: Simplify to \'{sim}\'">\1 <small class="red-tag">[&rarr; {sim}]</small></span>',
                         s_escaped,
                         flags=re.IGNORECASE
                     )
@@ -910,7 +910,7 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
                 for jg, sim in jargon_map.items():
                     s_escaped = re.sub(
                         rf"\b({re.escape(jg)})\b",
-                        rf'<span class="hl-jargon" title="Complex Jargon: Consider \'{sim}\'">\1 <small class="sim-tag">[➔ {sim}]</small></span>',
+                        rf'<span class="hl-jargon" title="Complex Jargon: Consider \'{sim}\'">\1 <small class="sim-tag">[&rarr; {sim}]</small></span>',
                         s_escaped,
                         flags=re.IGNORECASE
                     )

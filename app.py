@@ -4,10 +4,18 @@ import json
 import pandas as pd
 import streamlit as st
 
+import importlib
 import crawler
 import audit_engine
 import api_integrations
 import export_helper
+
+# Force-reload local modules on every run so any long-running Streamlit process gets latest code
+for _mod in [crawler, audit_engine, api_integrations, export_helper]:
+    try:
+        importlib.reload(_mod)
+    except Exception:
+        pass
 
 # Page configuration
 st.set_page_config(
