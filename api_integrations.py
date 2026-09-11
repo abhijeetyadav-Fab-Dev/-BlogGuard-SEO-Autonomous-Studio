@@ -246,3 +246,35 @@ Provide:
 3. 📊 Estimated Readability Boost (Before vs. After comparison)
 """
     return query_deepseek_copilot(prompt, api_key, model=model)
+
+
+def verify_content_and_facts(article_data, api_key, model="deepseek-chat"):
+    title = article_data.get("title", "")
+    sample_text = article_data.get("clean_text", "")[:4500]
+
+    prompt = f"""
+You are a Lead Fact-Checker, Senior Proofreader, and Head of Content Quality.
+Conduct an exhaustive, forensic verification of this blog post covering Grammar, Sentence Structure, Clarity, and Content-to-Information Alignment.
+
+SOURCE ARTICLE:
+Title: {title}
+Content:
+\"\"\"{sample_text}\"\"\"
+
+AUDIT REQUIREMENTS:
+1. 🎯 Content & Information Alignment Check:
+   - Does the content actually deliver on the promise, angle, and expectation set in the Title?
+   - Is there any title-content drift, bait-and-switch, or missing information promised in the headline or intro?
+2. ⚠️ Logical & Factual Contradiction Scan:
+   - Are there internal contradictions between different paragraphs, statistics, dates, or recommendations?
+   - Point out any unsupported factual leaps or logical fallacies.
+3. ✍️ Grammar, Syntax & Sentence Errors:
+   - Identify specific grammatical errors, subject-verb disagreements, awkward idioms, punctuation blunders, or dangling modifiers.
+   - For every error, provide the EXACT flawed sentence and the CORRECTED version.
+4. 👓 Cognitive Clarity & Comprehension Review:
+   - Point out any dense, vague, or muddy sentences that confuse the reader.
+   - Provide a crystal-clear rewrite for the 3 most confusing passages.
+5. 📊 Verdict & Readiness Score:
+   - Provide an overall Clarity & Alignment Score (0-100) and an editorial sign-off verdict.
+"""
+    return query_deepseek_copilot(prompt, api_key, model=model)

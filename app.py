@@ -110,6 +110,31 @@ st.markdown("""
         border: 1px solid #d8b4fe;
         margin-left: 3px;
     }
+    .hl-redundant {
+        background-color: #ffedd5;
+        color: #9a3412;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border-bottom: 2px solid #f97316;
+    }
+    .hl-passive {
+        background-color: #e0f2fe;
+        border-left: 3.5px solid #0284c7;
+        padding: 2px 6px;
+        border-radius: 3px;
+        display: inline;
+    }
+    .red-tag {
+        font-size: 11px;
+        font-weight: 700;
+        color: #c2410c;
+        background: #ffffff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        border: 1px solid #fdba74;
+        margin-left: 3px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -525,6 +550,7 @@ else:
     tabs = st.tabs([
         "📊 360° Scorecard",
         "🚨 Actionable Issues",
+        "🔍 Grammar, Clarity & Alignment",
         "🎨 In-Text Issue Highlighter",
         "🔍 Google SERP (SerpApi)",
         "🧠 DeepSeek AI Copilot",
@@ -607,27 +633,145 @@ else:
             st.info("💡 **Tip:** Switch to the **'🎨 In-Text Issue Highlighter'** tab above to see these exact jargon words, run-on sentences, and typos highlighted live inside your article!")
 
     # -------------------------------------------------------------------------
-    # TAB 3: In-Text Issue Highlighter
+    # TAB 3: Grammar, Clarity & Content-Information Alignment
     # -------------------------------------------------------------------------
     with tabs[2]:
+        st.subheader("🔍 Grammar, Clarity & Content-Information Alignment")
+        st.caption("Comprehensive analysis of linguistic precision, passive voice, wordy redundancies, reading clarity, and title-to-content promise delivery.")
+
+        align = c_audit.get("content_alignment", {})
+        passive = c_audit.get("passive_voice", {})
+        red_list = c_audit.get("redundancies", [])
+        clarity_score = c_audit.get("clarity_score", 0)
+
+        # 4 Core Pillar Metrics
+        gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+        with gcol1:
+            align_score = align.get("score", 0)
+            align_delta = "High Alignment" if align_score >= 80 else ("Moderate Drift" if align_score >= 60 else "Major Mismatch")
+            st.metric("Headline Alignment", f"{align_score}/100", align_delta)
+        with gcol2:
+            clarity_delta = "Crisp & Clear" if clarity_score >= 80 else ("Acceptable" if clarity_score >= 60 else "Dense/Complex")
+            st.metric("Clarity & Flow Index", f"{clarity_score}/100", clarity_delta)
+        with gcol3:
+            pv_pct = passive.get("percentage", 0.0)
+            pv_delta = "Active Voice" if pv_pct <= 10 else ("Acceptable" if pv_pct <= 20 else "Too Passive")
+            st.metric("Passive Voice", f"{pv_pct}%", f"{passive.get('count', 0)} sentences ({pv_delta})", delta_color="inverse" if pv_pct > 15 else "normal")
+        with gcol4:
+            total_red_count = sum(r.get("count", 0) for r in red_list)
+            st.metric("Wordy Redundancies", f"{len(red_list)} phrases", f"{total_red_count} total occurrences")
+
+        st.divider()
+
+        # Section 1: Headline to Content Alignment & Promise Delivery
+        st.markdown("### 🎯 Headline-to-Content Promise Fulfillment")
+        st.caption("Evaluates whether the article actually delivers on what the title promises, verifying H1/H2 topic alignment and listicle/how-to structure.")
+
+        obs = align.get("observations", [])
+        if obs:
+            for ob in obs:
+                if ob.startswith("✅"):
+                    st.success(ob)
+                elif ob.startswith("⚠️"):
+                    st.warning(ob)
+                elif ob.startswith("❌"):
+                    st.error(ob)
+                else:
+                    st.info(ob)
+        else:
+            st.info("Content structure matches title expectations.")
+
+        st.divider()
+
+        # Section 2: Passive Voice Analysis & Improvement
+        st.markdown("### 🗣️ Passive Voice vs Active Voice")
+        st.caption("Active voice makes your writing direct, authoritative, and engaging. Google and readers prefer clear subject-action constructions.")
+
+        if passive.get("count", 0) == 0:
+            st.success("🎉 Excellent! Zero passive voice constructions detected. Your writing is fully active and punchy.")
+        else:
+            if pv_pct > 15:
+                st.warning(f"⚠️ {pv_pct}% of your sentences use passive voice (industry target: under 10%).")
+            else:
+                st.info(f"Passive voice is at {pv_pct}% ({passive.get('count', 0)} sentences), which is within acceptable limits.")
+
+            with st.expander(f"Inspect Detected Passive Voice Sentences ({passive.get('count', 0)} found)", expanded=(pv_pct > 15)):
+                for psent in passive.get("sentences", []):
+                    st.markdown(f"- 🔵 *\"{psent}\"*")
+                st.caption("💡 Switch to the **'🎨 In-Text Issue Highlighter'** tab to see these sentences highlighted in blue directly in the article body.")
+
+        st.divider()
+
+        # Section 3: Wordiness & Redundancy Trimmer
+        st.markdown("### ✂️ Wordiness & Redundancy Trimmer")
+        st.caption("Eliminate flab from your copy. Replacing filler words with concise alternatives strengthens your message and boosts readability.")
+
+        if not red_list:
+            st.success("🎉 Clean copy! No common redundant or wordy filler phrases detected.")
+        else:
+            red_df = pd.DataFrame(red_list).rename(columns={
+                "phrase": "Redundant Phrase",
+                "count": "Occurrences",
+                "replacement": "Concise Alternative"
+            })
+            st.dataframe(red_df[["Redundant Phrase", "Occurrences", "Concise Alternative"]], use_container_width=True, hide_index=True)
+            st.caption("💡 Switch to the **'🎨 In-Text Issue Highlighter'** tab to see these phrases highlighted in orange with their one-click replacements.")
+
+        st.divider()
+
+        # Section 4: Deep AI Forensic Verification (Fact-checking, Logic & Contradictions)
+        st.markdown("### 🛡️ AI Deep Forensic & Factual Alignment Scanner")
+        st.caption("Harness DeepSeek AI to perform deep factual verification, uncover internal contradictions, audit grammar/syntax, and detect title drift.")
+
+        ds_key = st.session_state.deepseek_key
+        cache_key = f"{c_data['title']}-{deepseek_model}"
+
+        if not ds_key:
+            st.warning("Enter your DeepSeek API Key in the left sidebar to run deep AI fact and contradiction audits.")
+        else:
+            if st.button("🛡️ Run Deep Forensic & Factual Verification", key=f"btn_verify_{selected_idx}", use_container_width=True):
+                with st.spinner("DeepSeek AI is forensically analyzing article facts, logic, grammar, and headline alignment..."):
+                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ds_key, model=deepseek_model)
+                    if v_res.get("success"):
+                        st.session_state.ai_audit_cache[f"{cache_key}-verification"] = v_res
+                    else:
+                        st.error(v_res.get("error", "Verification failed"))
+
+            if f"{cache_key}-verification" in st.session_state.ai_audit_cache:
+                v_data = st.session_state.ai_audit_cache[f"{cache_key}-verification"]
+                if v_data.get("reasoning"):
+                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                        st.write(v_data["reasoning"])
+                st.markdown(v_data["content"])
+
+    # -------------------------------------------------------------------------
+    # TAB 4: In-Text Issue Highlighter
+    # -------------------------------------------------------------------------
+    with tabs[3]:
         st.subheader("🎨 Live In-Text Visual Issue Highlighter")
-        st.caption("Inspect your full article with color-coded in-line highlights for run-on sentences, complex jargon, typos, and keyword density.")
+        st.caption("Inspect your full article with color-coded in-line highlights for run-on sentences, complex jargon, typos, redundancies, passive voice, and keyword density.")
 
         # Interactive Controls
-        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4, ctrl_col5, ctrl_col6 = st.columns(6)
         with ctrl_col1:
-            hl_ls = st.checkbox("🟡 Run-On Sentences (>25 words)", value=True, key=f"hl_ls_{selected_idx}")
+            hl_ls = st.checkbox("🟡 Run-On Sentences", value=True, key=f"hl_ls_{selected_idx}")
         with ctrl_col2:
-            hl_jg = st.checkbox("🟣 Jargon & Complex Terms", value=True, key=f"hl_jg_{selected_idx}")
+            hl_jg = st.checkbox("🟣 Complex Jargon", value=True, key=f"hl_jg_{selected_idx}")
         with ctrl_col3:
             hl_tp = st.checkbox("🔴 Spelling & Typos", value=True, key=f"hl_tp_{selected_idx}")
         with ctrl_col4:
+            hl_rd = st.checkbox("🟠 Redundancies", value=True, key=f"hl_rd_{selected_idx}")
+        with ctrl_col5:
+            hl_pv = st.checkbox("🔵 Passive Voice", value=True, key=f"hl_pv_{selected_idx}")
+        with ctrl_col6:
             hl_kw = st.checkbox("🟢 Focus Keyword", value=True, key=f"hl_kw_{selected_idx}")
 
         # Metrics Strip
         long_count = len(c_data.get("long_sentences", []))
         jargon_count = sum(j["Occurrences"] for j in c_audit.get("detected_jargon", []))
         typo_count = len(c_audit.get("corrections", []))
+        redundant_count = sum(r["count"] for r in c_audit.get("redundancies", []))
+        passive_count = c_audit.get("passive_voice", {}).get("count", 0)
         kw_count = len(re.findall(rf"\b{re.escape(c_audit['keyword'])}\b", c_data["clean_text"], re.IGNORECASE)) if c_audit["keyword"] else 0
 
         st.markdown(
@@ -637,10 +781,16 @@ else:
                     🟡 {long_count} Run-On Sentence(s)
                 </span>
                 <span style="background: #f3e8ff; color: #6b21a8; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #d8b4fe;">
-                    🟣 {jargon_count} Jargon Occurrence(s)
+                    🟣 {jargon_count} Jargon Term(s)
                 </span>
                 <span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #fca5a5;">
                     🔴 {typo_count} Spelling Correction(s)
+                </span>
+                <span style="background: #ffedd5; color: #c2410c; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #fed7aa;">
+                    🟠 {redundant_count} Redundant Phrase(s)
+                </span>
+                <span style="background: #dbeafe; color: #1e40af; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #bfdbfe;">
+                    🔵 {passive_count} Passive Sentence(s)
                 </span>
                 <span style="background: #dcfce7; color: #166534; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #86efac;">
                     🟢 {kw_count} Keyword Mention(s)
@@ -657,15 +807,17 @@ else:
             hl_kw=hl_kw,
             hl_jg=hl_jg,
             hl_tp=hl_tp,
-            hl_ls=hl_ls
+            hl_ls=hl_ls,
+            hl_rd=hl_rd,
+            hl_pv=hl_pv
         )
 
         st.markdown(f'<div class="blog-viewer-canvas">{highlighted_body}</div>', unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 4: Google SERP Intelligence (SerpApi)
+    # TAB 5: Google SERP Intelligence (SerpApi)
     # -------------------------------------------------------------------------
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("🔍 Google SERP Live Intelligence")
         kw = c_audit["keyword"]
         serp = current.get("serp") or st.session_state.serp_cache.get(kw)
@@ -710,16 +862,16 @@ else:
                 st.info("Click 'Fetch Live Google SERP' above to run live competitive intelligence.")
 
     # -------------------------------------------------------------------------
-    # TAB 5: DeepSeek AI Copilot
+    # TAB 6: DeepSeek AI Copilot
     # -------------------------------------------------------------------------
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("🧠 DeepSeek AI Editorial Director")
         ds_key = st.session_state.deepseek_key
 
         if not ds_key:
             st.warning("Please enter your DeepSeek API Key in the left sidebar to unlock the AI Copilot.")
         else:
-            ai_col1, ai_col2, ai_col3, ai_col4 = st.columns(4)
+            ai_col1, ai_col2, ai_col3, ai_col4, ai_col5 = st.columns(5)
             with ai_col1:
                 run_ai_audit_btn = st.button("⚡ Executive AI Audit", use_container_width=True)
             with ai_col2:
@@ -728,6 +880,8 @@ else:
                 run_ai_titles_btn = st.button("🎯 CTR Titles & Meta", use_container_width=True)
             with ai_col4:
                 run_ai_read_btn = st.button("🪄 Readability Rewriter", use_container_width=True)
+            with ai_col5:
+                run_ai_verify_btn = st.button("🛡️ Content & Fact Audit", use_container_width=True)
 
             cache_key = f"{c_data['title']}-{deepseek_model}"
 
@@ -765,6 +919,14 @@ else:
                     else:
                         st.error(r_res.get("error"))
 
+            if run_ai_verify_btn:
+                with st.spinner("Forensically verifying content, facts, and alignment..."):
+                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ds_key, model=deepseek_model)
+                    if v_res.get("success"):
+                        st.session_state.ai_audit_cache[f"{cache_key}-verification"] = v_res
+                    else:
+                        st.error(v_res.get("error"))
+
             # Display cached AI outputs
             if f"{cache_key}-audit" in st.session_state.ai_audit_cache:
                 st.markdown("### 📋 DeepSeek Strategic Editorial Verdict")
@@ -790,10 +952,18 @@ else:
                         st.write(res["reasoning"])
                 st.markdown(res["content"])
 
+            if f"{cache_key}-verification" in st.session_state.ai_audit_cache:
+                st.markdown("### 🛡️ Deep Forensic & Factual Alignment Report")
+                res = st.session_state.ai_audit_cache[f"{cache_key}-verification"]
+                if res.get("reasoning"):
+                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                        st.write(res["reasoning"])
+                st.markdown(res["content"])
+
     # -------------------------------------------------------------------------
-    # TAB 6: Core Web Vitals & PageSpeed
+    # TAB 7: Core Web Vitals & PageSpeed
     # -------------------------------------------------------------------------
-    with tabs[5]:
+    with tabs[6]:
         st.subheader("⚡ Google Core Web Vitals & Mobile Performance")
         ps = current.get("pagespeed") or st.session_state.pagespeed_cache.get(c_data["url"])
 
@@ -827,9 +997,9 @@ else:
             st.info("Core Web Vitals check evaluates real-world mobile UX metrics (LCP, CLS, FCP) directly via Google's Lighthouse engine.")
 
     # -------------------------------------------------------------------------
-    # TAB 7: SERP & Social Preview
+    # TAB 8: SERP & Social Preview
     # -------------------------------------------------------------------------
-    with tabs[6]:
+    with tabs[7]:
         st.subheader("📱 Live SERP & Social Sharing Simulators")
         serp_title = c_data["title"][:60]
         serp_url = c_data["url"]
@@ -858,9 +1028,9 @@ else:
         """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 8: Content Hierarchy
+    # TAB 9: Content Hierarchy
     # -------------------------------------------------------------------------
-    with tabs[7]:
+    with tabs[8]:
         st.subheader("📑 Document Heading Hierarchy")
         st.write(f"Total Headings: **{len(c_data['headings'])}** (H1: {c_audit['h1_count']}, H2: {c_audit['h2_count']}, H3: {c_audit['h3_count']})")
 
@@ -880,9 +1050,9 @@ else:
                 st.write(f"- ({ls['word_count']} words): *\"{ls['sentence']}\"*")
 
     # -------------------------------------------------------------------------
-    # TAB 9: Media & Links
+    # TAB 10: Media & Links
     # -------------------------------------------------------------------------
-    with tabs[8]:
+    with tabs[9]:
         st.subheader("🖼️ Image Alt Text & Format Audit")
         if c_data["images"]:
             img_df = pd.DataFrame(c_data["images"])[["src", "alt", "has_alt", "format", "loading"]]
@@ -906,9 +1076,9 @@ else:
                 st.write(f"- [{cit['text'] or cit['href']}]({cit['href']})")
 
     # -------------------------------------------------------------------------
-    # TAB 10: Checklist & Export
+    # TAB 11: Checklist & Export
     # -------------------------------------------------------------------------
-    with tabs[9]:
+    with tabs[10]:
         st.subheader("📝 Pre-Publish Editorial Sign-off")
         chk_items = [
             "Primary keyword present in Title, H1 and First 100 Words",

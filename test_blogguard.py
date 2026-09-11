@@ -14,11 +14,56 @@ class TestBlogGuard(unittest.TestCase):
         self.assertIn("flesch_reading_ease", read)
         self.assertIn("flesch_kincaid_grade", read)
     def test_highlighted_html(self):
-        text = "Organizations must utilize modern strategies to avoid mistakes. Furthermore, we recieved alot of feedback."
-        html_res = audit_engine.generate_highlighted_html(text, keyword="strategies", hl_kw=True, hl_jg=True, hl_tp=True, hl_ls=True)
+        text = "Organizations must utilize modern strategies to avoid mistakes. Furthermore, we recieved alot of feedback. The report was written by our team in order to provide clarity."
+        html_res = audit_engine.generate_highlighted_html(
+            text,
+            keyword="strategies",
+            hl_kw=True,
+            hl_jg=True,
+            hl_tp=True,
+            hl_ls=True,
+            hl_rd=True,
+            hl_pv=True
+        )
         self.assertIn("hl-kw", html_res)
         self.assertIn("hl-jargon", html_res)
         self.assertIn("hl-typo", html_res)
+        self.assertIn("hl-redundant", html_res)
+        self.assertIn("hl-passive", html_res)
+
+    def test_grammar_clarity_alignment(self):
+        # 1. Passive voice detection
+        sentences = [
+            "The SEO audit was performed by our team.",
+            "Search engines reward active, engaging writing.",
+            "New guidelines were published by Google."
+        ]
+        pv = audit_engine.detect_passive_voice(sentences)
+        self.assertEqual(pv["count"], 2)
+        self.assertAlmostEqual(pv["percentage"], 66.7, places=1)
+
+        # 2. Redundancy detection
+        sample_text = "In order to succeed, at this point in time we must make a decision for the purpose of growth."
+        reds = audit_engine.detect_redundancies(sample_text)
+        phrases = [r["phrase"] for r in reds]
+        self.assertIn("in order to", phrases)
+        self.assertIn("at this point in time", phrases)
+        self.assertIn("for the purpose of", phrases)
+
+        # 3. Content alignment test
+        title = "10 Best SEO Practices For High Ranking"
+        h1 = ["10 Best SEO Practices For High Ranking"]
+        h2 = ["Practice 1: Keyword Research", "Practice 2: Backlinks", "Practice 3: Speed"]
+        text = "This guide covers SEO practices and keyword research to improve rankings on search engines."
+        align = audit_engine.check_content_alignment(title, h1, h2, text)
+        self.assertIn("score", align)
+        self.assertEqual(align["promise_type"], "listicle")
+        self.assertEqual(align["promised_number"], 10)
+        self.assertEqual(align["actual_h2_count"], 3)
+        # Should flag mismatch between promised 10 and actual 3
+        mismatch_found = any("promises 10 items" in obs for obs in align["observations"])
+        self.assertTrue(mismatch_found)
+
 
     def test_mock_page_audit(self):
         mock_data = {

@@ -50,6 +50,38 @@ COMMON_JARGON_REPLACEMENTS = {
     "advantageous": "helpful",
     "disseminate": "share",
     "predominantly": "mostly",
+}
+
+COMMON_REDUNDANCIES = {
+    "absolutely essential": "essential",
+    "actual facts": "facts",
+    "advance warning": "warning",
+    "all-time record": "record",
+    "alternative choice": "choice",
+    "basic fundamentals": "fundamentals",
+    "close proximity": "near",
+    "completely finished": "finished",
+    "end result": "result",
+    "exact same": "same",
+    "final outcome": "outcome",
+    "first and foremost": "first",
+    "future plans": "plans",
+    "general consensus": "consensus",
+    "join together": "join",
+    "major breakthrough": "breakthrough",
+    "past experience": "experience",
+    "past history": "history",
+    "plan ahead": "plan",
+    "reason why": "reason",
+    "revert back": "revert",
+    "sum total": "total",
+    "unexpected surprise": "surprise",
+    "for the purpose of": "to",
+    "in spite of the fact that": "although",
+    "each and every": "every",
+    "period of time": "period",
+    "true facts": "facts",
+    "at this point in time": "now",
     "prior to": "before",
     "in order to": "to",
     "due to the fact that": "because",
@@ -58,6 +90,101 @@ COMMON_JARGON_REPLACEMENTS = {
     "in the event that": "if",
     "a large number of": "many",
 }
+
+
+def detect_passive_voice(sentences):
+    passive_sents = []
+    pattern = re.compile(r'\b(?:am|is|are|was|were|be|been|being)\s+(?:\w+ed|written|made|done|seen|given|taken|built|chosen|known|shown|found|said|held|sent)\b', re.IGNORECASE)
+    for s in sentences:
+        if pattern.search(s):
+            passive_sents.append(s)
+    pct = round((len(passive_sents) / max(1, len(sentences))) * 100, 1)
+    return {
+        "count": len(passive_sents),
+        "percentage": pct,
+        "sentences": passive_sents[:8]
+    }
+
+
+def detect_redundancies(clean_text):
+    found = []
+    for red, sim in COMMON_REDUNDANCIES.items():
+        count = len(re.findall(rf'\b{re.escape(red)}\b', clean_text, re.IGNORECASE))
+        if count > 0:
+            found.append({
+                "Redundant Phrase": red,
+                "Simpler Alternative": sim,
+                "Occurrences": count,
+                "phrase": red,
+                "replacement": sim,
+                "count": count
+            })
+    return found
+
+
+def check_content_alignment(title, h1_list, h2_list, clean_text):
+    stopwords = {"the", "and", "for", "with", "from", "best", "top", "this", "that", "your", "how", "what", "why", "when", "into"}
+    title_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', title) if w.lower() not in stopwords]
+
+    if not title_words:
+        return {"score": 90, "status": "Strong Match", "observations": ["Title is concise and matches core article focus."]}
+
+    found_in_body = sum(1 for w in title_words if w in clean_text.lower())
+    found_in_h2 = sum(1 for w in title_words if any(w in h.lower() for h in h2_list))
+
+    body_ratio = found_in_body / len(title_words)
+    score = int((body_ratio * 55) + (min(len(h2_list), 3) * 10) + (min(found_in_h2, len(title_words)) / len(title_words) * 15))
+    score = min(100, max(10, score))
+
+    observations = []
+    promise_type = "general"
+    promised_num = None
+
+    # Check number promise in title: e.g. '10 Best Hotels in...'
+    num_match = re.search(r'\b(\d+)\b', title)
+    if num_match:
+        val = int(num_match.group(1))
+        if 2 <= val <= 100:
+            promised_num = val
+            promise_type = "listicle"
+            if len(h2_list) < promised_num:
+                observations.append(f"⚠️ Headline promises {promised_num} items, but only {len(h2_list)} H2 sections were detected.")
+                score = max(35, score - 20)
+            else:
+                observations.append(f"✅ Headline promises {promised_num} items, and {len(h2_list)} H2 sections provide the promised breakdown.")
+
+    # Check 'How To' promise
+    if re.search(r'\b(?:how to|step-by-step|guide|tutorial)\b', title, re.IGNORECASE):
+        if promise_type == "general":
+            promise_type = "how_to"
+        if not re.search(r'\b(?:step \d|step-by-step|instructions|method|guide|first,|second,|finally,)\b', clean_text, re.IGNORECASE):
+            observations.append("⚠️ Title promises a practical 'How-To' guide, but text lacks clear step-by-step markers.")
+            score = max(40, score - 15)
+        else:
+            observations.append("✅ Practical step-by-step instructions deliver on the 'How-To' promise.")
+
+    # Check Comparison / Versus promise
+    if re.search(r'\b(?:vs|versus|comparison|compared to)\b', title, re.IGNORECASE):
+        if promise_type == "general":
+            promise_type = "comparison"
+        observations.append("ℹ️ Title indicates a comparative analysis. Ensure both subjects receive balanced depth and pros/cons.")
+
+    if score >= 85:
+        status = "Strong Match (High Fulfillment)"
+    elif score >= 65:
+        status = "Good Alignment (Minor Gaps)"
+    else:
+        status = "Content Mismatch Risk (Headline Drift)"
+
+    return {
+        "score": score,
+        "status": status,
+        "observations": observations,
+        "title_keywords_matched": f"{found_in_body}/{len(title_words)}",
+        "promise_type": promise_type,
+        "promised_number": promised_num,
+        "actual_h2_count": len(h2_list)
+    }
 
 
 def audit_page(data, keyword=None, writer=None):
@@ -314,6 +441,52 @@ def audit_page(data, keyword=None, writer=None):
             "detail": f"{round(long_sent_pct, 1)}% of sentences exceed 28 words, causing reader fatigue.",
             "fix": "Split sentences exceeding 25 words into two punchier sentences."
         })
+
+    # Grammar, Sentence Errors & Clarity Checks
+    sentences_list = [s.strip() for s in re.split(r"[.!?]+", clean_text) if s.strip()]
+    passive_info = detect_passive_voice(sentences_list)
+    redundancies_info = detect_redundancies(clean_text)
+    alignment_info = check_content_alignment(title, h1_list, h2_list, clean_text)
+
+    # Passive voice warning
+    if passive_info["percentage"] > 18.0:
+        issues.append({
+            "severity": "warning",
+            "pillar": "Readability",
+            "title": f"Excessive Passive Voice ({passive_info['percentage']}%)",
+            "detail": f"{passive_info['count']} sentences use passive voice constructions. Passive voice slows reader comprehension and weakens authority.",
+            "fix": "Rewrite passive sentences in active voice (e.g. 'The report was compiled by our team' ➔ 'Our team compiled the report')."
+        })
+
+    # Redundancies / Wordiness warning
+    if len(redundancies_info) > 0:
+        red_examples = ", ".join([f"'{r['Redundant Phrase']}' ➔ '{r['Simpler Alternative']}'" for r in redundancies_info[:3]])
+        issues.append({
+            "severity": "info",
+            "pillar": "Readability",
+            "title": f"Wordy & Redundant Phrases Detected ({len(redundancies_info)})",
+            "detail": f"Trimming wordy phrases improves sentence velocity: {red_examples}.",
+            "fix": "Replace redundant pairings with their single-word equivalents."
+        })
+
+    # Headline vs Content Alignment warning
+    if alignment_info["score"] < 70:
+        issues.append({
+            "severity": "warning",
+            "pillar": "Content Depth",
+            "title": "Headline-to-Content Information Mismatch",
+            "detail": " ".join(alignment_info["observations"]) if alignment_info["observations"] else "Article body drifts away from the core premise established in the title.",
+            "fix": "Align H2 subheadings and body sections to directly deliver on the specific promise made in the title."
+        })
+
+    # Calculate overall Clarity Score (0-100)
+    clarity_deductions = (
+        min(30, (100 - reading_ease) * 0.35)
+        + min(25, passive_info["percentage"] * 0.75)
+        + min(25, long_sent_pct * 0.75)
+        + min(20, len(redundancies_info) * 3)
+    )
+    clarity_score = max(10, min(100, round(100 - clarity_deductions)))
 
     has_conclusion = bool(re.search(r"(?i)\b(?:conclusion|final thoughts|summary|wrap-up|key takeaways|wrapping up)\b", clean_text))
     if has_conclusion:
@@ -642,6 +815,10 @@ def audit_page(data, keyword=None, writer=None):
         "reading_time_min": data.get("reading_time_min", 1),
         "readability": readability,
         "detected_jargon": detected_jargon,
+        "content_alignment": alignment_info,
+        "passive_voice": passive_info,
+        "redundancies": redundancies_info,
+        "clarity_score": clarity_score,
         "h1_count": h1_count,
         "h2_count": h2_count,
         "h3_count": len(h3_list),
@@ -654,7 +831,7 @@ def audit_page(data, keyword=None, writer=None):
     }
 
 
-def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=None, hl_kw=True, hl_jg=True, hl_tp=True, hl_ls=True):
+def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=None, hl_kw=True, hl_jg=True, hl_tp=True, hl_ls=True, hl_rd=True, hl_pv=True):
     jargon_map = jargon_map or COMMON_JARGON_REPLACEMENTS
     typo_map = typo_map or COMMON_SPELLING_FIXES
 
@@ -663,6 +840,7 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
         paragraphs = [raw_text.strip()] if raw_text.strip() else []
 
     out_paragraphs = []
+    passive_pattern = re.compile(r'\b(?:am|is|are|was|were|be|been|being)\s+(?:\w+ed|written|made|done|seen|given|taken|built|chosen|known|shown|found|said|held|sent)\b', re.IGNORECASE)
 
     for p in paragraphs:
         # Check if heading
@@ -693,6 +871,7 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
         for s in reconstructed:
             words = re.findall(r"\b\w+\b", s)
             is_long = len(words) > 25
+            is_passive = bool(passive_pattern.search(s))
 
             s_escaped = html.escape(s)
 
@@ -716,7 +895,17 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
                         flags=re.IGNORECASE
                     )
 
-            # 3. Highlight complex jargon words
+            # 3. Highlight redundancies & wordiness (multi-word phrases first)
+            if hl_rd:
+                for red, sim in COMMON_REDUNDANCIES.items():
+                    s_escaped = re.sub(
+                        rf"\b({re.escape(red)})\b",
+                        rf'<span class="hl-redundant" title="Wordy/Redundant: Simplify to \'{sim}\'">\1 <small class="red-tag">[➔ {sim}]</small></span>',
+                        s_escaped,
+                        flags=re.IGNORECASE
+                    )
+
+            # 4. Highlight complex jargon words
             if hl_jg:
                 for jg, sim in jargon_map.items():
                     s_escaped = re.sub(
@@ -726,7 +915,15 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
                         flags=re.IGNORECASE
                     )
 
-            # 4. Highlight run-on sentence wrapper
+            # 5. Highlight passive voice sentence
+            if hl_pv and is_passive and not is_long:
+                s_escaped = (
+                    f'<span class="hl-passive" title="Passive voice sentence - switch to active voice for punchier clarity">'
+                    f'{s_escaped}'
+                    f'</span>'
+                )
+
+            # 6. Highlight run-on sentence wrapper
             if hl_ls and is_long:
                 s_escaped = (
                     f'<span class="hl-long-sent" title="Run-on sentence ({len(words)} words - consider splitting)">'
@@ -739,3 +936,4 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
         out_paragraphs.append(f"<p style='margin-bottom: 16px; line-height: 1.8; color: #1e293b;'>{' '.join(p_html_parts)}</p>")
 
     return "\n".join(out_paragraphs)
+
