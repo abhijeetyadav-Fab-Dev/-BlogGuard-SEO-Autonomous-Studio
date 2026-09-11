@@ -533,6 +533,13 @@ else:
             st.subheader("Spelling & Typography Cleanups")
             st.dataframe(pd.DataFrame(c_audit["corrections"]), use_container_width=True, hide_index=True)
 
+        # Jargon & Complex Vocabulary Simplifier
+        if c_audit.get("detected_jargon"):
+            st.divider()
+            st.subheader("📖 Complex Jargon & Vocabulary Simplifier")
+            st.caption("Replacing these multi-syllable corporate/academic terms with plain conversational words will immediately boost your Flesch Reading Ease score:")
+            st.dataframe(pd.DataFrame(c_audit["detected_jargon"]), use_container_width=True, hide_index=True)
+
     # -------------------------------------------------------------------------
     # TAB 3: Google SERP Intelligence (SerpApi)
     # -------------------------------------------------------------------------
@@ -590,13 +597,15 @@ else:
         if not ds_key:
             st.warning("Please enter your DeepSeek API Key in the left sidebar to unlock the AI Copilot.")
         else:
-            ai_col1, ai_col2, ai_col3 = st.columns(3)
+            ai_col1, ai_col2, ai_col3, ai_col4 = st.columns(4)
             with ai_col1:
                 run_ai_audit_btn = st.button("⚡ Executive AI Audit", use_container_width=True)
             with ai_col2:
                 run_ai_faq_btn = st.button("📋 Generate FAQ Schema", use_container_width=True)
             with ai_col3:
-                run_ai_titles_btn = st.button("🎯 Generate CTR Titles & Meta", use_container_width=True)
+                run_ai_titles_btn = st.button("🎯 CTR Titles & Meta", use_container_width=True)
+            with ai_col4:
+                run_ai_read_btn = st.button("🪄 Readability Rewriter", use_container_width=True)
 
             cache_key = f"{c_data['title']}-{deepseek_model}"
 
@@ -626,6 +635,14 @@ else:
                     else:
                         st.error(t_res.get("error"))
 
+            if run_ai_read_btn:
+                with st.spinner("Generating conversational readability rewrite (Flesch 65–75)..."):
+                    r_res = api_integrations.rewrite_for_readability(c_data, api_key=ds_key, model=deepseek_model)
+                    if r_res.get("success"):
+                        st.session_state.ai_audit_cache[f"{cache_key}-readability"] = r_res
+                    else:
+                        st.error(r_res.get("error"))
+
             # Display cached AI outputs
             if f"{cache_key}-audit" in st.session_state.ai_audit_cache:
                 st.markdown("### 📋 DeepSeek Strategic Editorial Verdict")
@@ -642,6 +659,14 @@ else:
             if f"{cache_key}-titles" in st.session_state.ai_audit_cache:
                 st.markdown("### 🎯 High-CTR Titles & Meta Descriptions")
                 st.markdown(st.session_state.ai_audit_cache[f"{cache_key}-titles"]["content"])
+
+            if f"{cache_key}-readability" in st.session_state.ai_audit_cache:
+                st.markdown("### 🪄 DeepSeek Conversational Readability Rewrite (Flesch 65–75)")
+                res = st.session_state.ai_audit_cache[f"{cache_key}-readability"]
+                if res.get("reasoning"):
+                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                        st.write(res["reasoning"])
+                st.markdown(res["content"])
 
     # -------------------------------------------------------------------------
     # TAB 5: Core Web Vitals & PageSpeed

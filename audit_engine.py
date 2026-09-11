@@ -23,6 +23,41 @@ COMMON_SPELLING_FIXES = {
     "tommorrow": "tomorrow",
 }
 
+COMMON_JARGON_REPLACEMENTS = {
+    "utilize": "use",
+    "utilizes": "uses",
+    "utilizing": "using",
+    "utilization": "use",
+    "commence": "start",
+    "commenced": "started",
+    "facilitate": "help",
+    "facilitates": "helps",
+    "subsequently": "then / later",
+    "furthermore": "also / plus",
+    "consequently": "so / as a result",
+    "implementation": "setup / launch",
+    "implementing": "setting up",
+    "approximately": "about",
+    "demonstrate": "show",
+    "demonstrates": "shows",
+    "terminate": "end / stop",
+    "expedite": "speed up",
+    "leverage": "use",
+    "leveraging": "using",
+    "endeavor": "try",
+    "methodology": "method / approach",
+    "advantageous": "helpful",
+    "disseminate": "share",
+    "predominantly": "mostly",
+    "prior to": "before",
+    "in order to": "to",
+    "due to the fact that": "because",
+    "with regard to": "about",
+    "at the present time": "now",
+    "in the event that": "if",
+    "a large number of": "many",
+}
+
 
 def audit_page(data, keyword=None, writer=None):
     keyword = (keyword or data.get("suggested_keyword") or "").strip()
@@ -227,6 +262,17 @@ def audit_page(data, keyword=None, writer=None):
             "fix": "Expand article to at least 1,000+ words with practical case studies, steps, and FAQs."
         })
 
+    # Detect specific jargon in the text
+    detected_jargon = []
+    for jw, simpler in COMMON_JARGON_REPLACEMENTS.items():
+        count = len(re.findall(rf"\b{re.escape(jw)}\b", clean_text, re.IGNORECASE))
+        if count > 0:
+            detected_jargon.append({
+                "Jargon Word": jw,
+                "Simpler Alternative": simpler,
+                "Occurrences": count
+            })
+
     reading_ease = readability.get("flesch_reading_ease", 60.0)
     if 60 <= reading_ease <= 80:
         content_score += 30
@@ -235,12 +281,19 @@ def audit_page(data, keyword=None, writer=None):
     else:
         content_score += 14
         if reading_ease < 50:
+            jargon_ex = ", ".join([f"'{item['Jargon Word']}' ➔ '{item['Simpler Alternative']}'" for item in detected_jargon[:4]])
+            fix_text = "Break sentences over 20 words into 2 punchy sentences. "
+            if jargon_ex:
+                fix_text += f"Replace complex terms: {jargon_ex}."
+            else:
+                fix_text += "Substitute multi-syllable jargon with direct, everyday verbs."
+
             issues.append({
                 "severity": "warning",
                 "pillar": "Readability",
-                "title": "Content is difficult to read",
-                "detail": f"Flesch Reading Ease is {reading_ease} (College level). Web readers prefer plain, conversational language.",
-                "fix": "Break up long compound sentences and substitute complex jargon with simpler terms."
+                "title": f"Content is difficult to read (Flesch {reading_ease})",
+                "detail": f"Flesch Reading Ease is {reading_ease} (College level). Web readers scan quickly and bounce when cognitive strain is high. Aim for 60-75 (conversational Grade 7-8).",
+                "fix": fix_text,
             })
 
     long_sent_count = len(long_sentences)
@@ -587,6 +640,7 @@ def audit_page(data, keyword=None, writer=None):
         "word_count": word_count,
         "reading_time_min": data.get("reading_time_min", 1),
         "readability": readability,
+        "detected_jargon": detected_jargon,
         "h1_count": h1_count,
         "h2_count": h2_count,
         "h3_count": len(h3_list),

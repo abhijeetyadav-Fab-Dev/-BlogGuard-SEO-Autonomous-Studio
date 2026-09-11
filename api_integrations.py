@@ -215,3 +215,34 @@ Generate 4 to 5 relevant Frequently Asked Questions and accurate, concise answer
 Return ONLY valid JSON inside a ```json ... ``` code block containing the <script type="application/ld+json"> content.
 """
     return query_deepseek_copilot(prompt, api_key, model=model)
+
+
+def rewrite_for_readability(article_data, api_key, model="deepseek-chat"):
+    title = article_data.get("title", "")
+    sample_text = article_data.get("clean_text", "")[:4000]
+
+    prompt = f"""
+You are an expert Copy Editor specializing in high-engagement, plain-language web writing.
+
+The following blog post currently has a low Flesch Reading Ease score (difficult / college level).
+Your task is to rewrite key complex sections of the text to achieve a Flesch Reading Ease score of 65–75 (conversational Grade 7-8 web standard).
+
+SOURCE ARTICLE:
+Title: {title}
+Content Excerpt:
+\"\"\"{sample_text}\"\"\"
+
+REWRITE MANDATES:
+1. Shorten sentences: Maximum 15–18 words per sentence. Split every compound or run-on sentence.
+2. Cut corporate jargon & academic fluff: Replace multi-syllable terms (e.g. 'utilize', 'facilitate', 'subsequently', 'methodology') with simple, everyday verbs ('use', 'help', 'then', 'way').
+3. Active Voice: Shift passive constructions to direct, active voice.
+4. Retention formatting: Use bullet points, bold key insights, and conversational transition phrases.
+5. Preserve topical authority: Retain all core technical facts, SEO keywords, and key arguments.
+
+OUTPUT FORMAT:
+Provide:
+1. 💡 Top 3 Readability Flaws in the Original (with specific word/phrase callouts)
+2. ✍️ Full Conversational Rewrite of the Key Sections (Grade 7-8 reading level)
+3. 📊 Estimated Readability Boost (Before vs. After comparison)
+"""
+    return query_deepseek_copilot(prompt, api_key, model=model)
