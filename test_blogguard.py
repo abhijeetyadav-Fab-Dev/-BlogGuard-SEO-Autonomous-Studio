@@ -123,5 +123,86 @@ class TestBlogGuard(unittest.TestCase):
         data = crawler.parse_page_data(res)
         self.assertIn("Example Domain", data["title"])
 
+    def test_crawler_error_handling(self):
+        # Invalid / non-existent domain should gracefully return status >= 400 and error string, never crash
+        res = crawler.fetch_html("https://invalid-non-existent-domain-test-xyz987.com", use_browser=False)
+        self.assertGreaterEqual(res["status_code"], 400)
+        self.assertTrue(bool(res.get("error")))
+        self.assertEqual(res["html"], "")
+
+    def test_mode2_battle_comparison_data_integrity(self):
+        import pandas as pd
+        # Simulate dual article audit
+        p1 = {"title": "Post 1", "clean_text": "SEO tips for search engine ranking.", "words": ["seo"]*200, "sentence_count": 10, "paragraph_count": 2, "headings": [], "h1_list": ["Post 1"], "h2_list": ["Section A"], "h3_list": [], "images": [], "images_without_alt": [], "citation_links": [], "internal_links_count": 1, "in_text_sources": 0, "schema_types": [], "readability": {"flesch_reading_ease": 60.0, "flesch_kincaid_grade": 8.0, "avg_sentence_length": 15, "complex_words": 10}, "long_sentences": [], "url": "https://p1.com", "final_url": "https://p1.com", "status_code": 200, "load_time_sec": 0.5, "engine": "HTTP"}
+        p2 = {"title": "Post 2", "clean_text": "Advanced guide to search engine ranking.", "words": ["seo"]*400, "sentence_count": 20, "paragraph_count": 4, "headings": [], "h1_list": ["Post 2"], "h2_list": ["Section X", "Section Y"], "h3_list": [], "images": [], "images_without_alt": [], "citation_links": [], "internal_links_count": 2, "in_text_sources": 0, "schema_types": [], "readability": {"flesch_reading_ease": 70.0, "flesch_kincaid_grade": 7.0, "avg_sentence_length": 12, "complex_words": 15}, "long_sentences": [], "url": "https://p2.com", "final_url": "https://p2.com", "status_code": 200, "load_time_sec": 0.4, "engine": "HTTP"}
+
+        a1 = audit_engine.audit_page(p1, keyword="search engine")
+        a2 = audit_engine.audit_page(p2, keyword="search engine")
+
+        cmp_table = [
+            {"Metric": "Overall SEO Score", "Your Post": f"{a1['overall_score']}/100", "Competitor": f"{a2['overall_score']}/100", "Winner": "You" if a1['overall_score'] >= a2['overall_score'] else "Competitor"},
+            {"Metric": "Word Count", "Your Post": f"{a1['word_count']:,}", "Competitor": f"{a2['word_count']:,}", "Winner": "You" if a1['word_count'] >= a2['word_count'] else "Competitor"},
+            {"Metric": "H2 Sections", "Your Post": a1['h2_count'], "Competitor": a2['h2_count'], "Winner": "You" if a1['h2_count'] >= a2['h2_count'] else "Competitor"},
+        ]
+        df = pd.DataFrame(cmp_table)
+        self.assertEqual(len(df), 3)
+        self.assertEqual(list(df.columns), ["Metric", "Your Post", "Competitor", "Winner"])
+
+    def test_mode4_manual_draft_audit_and_highlight(self):
+        draft_text = (
+            "# Complete SEO Strategy\n\n"
+            "In the modern era, seo is critical. Due to the fact that algorithms evolve, "
+            "organizations must utilize structured content. The report was written by our team "
+            "in order to explain best practices for search engines."
+        )
+        words = ["Complete", "SEO", "Strategy", "In", "the", "modern", "era"] * 20
+        sentences = [
+            "In the modern era, seo is critical.",
+            "Due to the fact that algorithms evolve, organizations must utilize structured content.",
+            "The report was written by our team in order to explain best practices for search engines."
+        ]
+        mock_data = {
+            "title": "Complete SEO Strategy",
+            "url": "Draft Article",
+            "clean_text": draft_text,
+            "words": words,
+            "word_count": len(words),
+            "sentence_count": len(sentences),
+            "paragraph_count": 2,
+            "headings": [{"tag": "h1", "level": 1, "text": "Complete SEO Strategy"}],
+            "h1_list": ["Complete SEO Strategy"],
+            "h2_list": ["Strategy Overview"],
+            "h3_list": [],
+            "images": [],
+            "images_without_alt": [],
+            "citation_links": [],
+            "internal_links_count": 0,
+            "in_text_sources": 0,
+            "schema_types": [],
+            "readability": crawler.calculate_readability(draft_text, words, sentences),
+            "long_sentences": [],
+            "suggested_keyword": "seo",
+            "final_url": "Draft Article",
+            "status_code": 200,
+            "load_time_sec": 0.0,
+            "engine": "Manual Draft",
+        }
+        res = audit_engine.audit_page(mock_data, keyword="seo")
+        self.assertGreater(res["overall_score"], 0)
+        self.assertIn("scores", res)
+
+        hl_html = audit_engine.generate_highlighted_html(
+            draft_text,
+            keyword="seo",
+            hl_kw=True,
+            hl_jg=True,
+            hl_tp=True,
+            hl_ls=True,
+            hl_rd=True,
+            hl_pv=True
+        )
+        self.assertIn("hl-kw", hl_html)
+        self.assertIn("hl-redundant", hl_html)
+
 if __name__ == "__main__":
     unittest.main()

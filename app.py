@@ -157,6 +157,8 @@ if "ai_audit_cache" not in st.session_state:
     st.session_state.ai_audit_cache = {}
 if "deepseek_key" not in st.session_state:
     st.session_state.deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+if "audit_mode" not in st.session_state:
+    st.session_state.audit_mode = "🌐 Autonomous Live URL Audit"
 
 # -----------------------------------------------------------------------------
 # SIDEBAR: Control Tower & API Integrations
@@ -167,17 +169,16 @@ with st.sidebar:
     st.caption("Autonomous Blog Architecture, Content & SERP Engine")
     st.divider()
 
-    st.subheader("🎯 Audit Mode")
-    audit_mode = st.radio(
-        "Choose Mode:",
-        [
-            "🌐 Autonomous Live URL Audit",
-            "⚔️ Competitor Battle Mode",
-            "📑 Batch / Multi-URL Audit",
-            "✍️ Manual Content Draft",
-        ],
-        label_visibility="collapsed"
-    )
+    st.subheader("🎯 Active Audit Mode")
+    st.info(f"**{st.session_state.audit_mode}**")
+    st.caption("Switch modes directly in the studio banner at the top of the main page.")
+
+    if st.session_state.results:
+        if st.button("🗑️ Clear Session Audits", use_container_width=True, help="Clear all currently stored audit results"):
+            st.session_state.results = []
+            if "battle_data" in st.session_state:
+                del st.session_state["battle_data"]
+            st.rerun()
 
     st.divider()
     st.subheader("🔌 Connected Rivers (APIs)")
@@ -231,16 +232,48 @@ with st.sidebar:
 st.title("🛡️ BlogGuard SEO Autonomous Studio")
 st.caption("End-to-end autonomous blog evaluation powered by Headless Browser, Google SerpApi & DeepSeek AI.")
 
+AUDIT_MODES = [
+    "🌐 Autonomous Live URL Audit",
+    "⚔️ Competitor Battle Mode",
+    "📑 Batch / Multi-URL Audit",
+    "✍️ Manual Content Draft",
+]
+
+st.markdown("#### 🎯 Choose Audit Engine Mode")
+audit_mode = st.radio(
+    "Audit Mode Selection",
+    AUDIT_MODES,
+    index=AUDIT_MODES.index(st.session_state.audit_mode) if st.session_state.audit_mode in AUDIT_MODES else 0,
+    horizontal=True,
+    key="audit_mode_selection_bar"
+)
+st.session_state.audit_mode = audit_mode
+st.divider()
+
 # -----------------------------------------------------------------------------
 # MODE 1: Autonomous Live URL Audit
 # -----------------------------------------------------------------------------
 if audit_mode == "🌐 Autonomous Live URL Audit":
     st.subheader("🌐 Live URL Autonomous Inspection")
+    st.caption("Audit any published article for technical structure, readability, wordiness, grammar, E-E-A-T, and SERP visibility.")
+
+    if "mode1_url" not in st.session_state:
+        st.session_state.mode1_url = ""
+    if "mode1_kw" not in st.session_state:
+        st.session_state.mode1_kw = ""
+
+    demo_col1, demo_col2 = st.columns([3, 1])
+    with demo_col2:
+        if st.button("✨ Load Demo Article", use_container_width=True, help="Populate with a live accessible article for instant testing"):
+            st.session_state.mode1_url = "https://en.wikipedia.org/wiki/Search_engine_optimization"
+            st.session_state.mode1_kw = "search engine optimization"
+            st.rerun()
+
     col1, col2 = st.columns([3, 2])
     with col1:
-        target_url = st.text_input("Blog Post URL", placeholder="https://example.com/blog/best-seo-tips")
+        target_url = st.text_input("Blog Post URL", value=st.session_state.mode1_url, placeholder="https://example.com/blog/best-seo-tips")
     with col2:
-        target_keyword = st.text_input("Primary Keyword (Leave empty for AI Auto-Discovery)", placeholder="e.g. best seo tips")
+        target_keyword = st.text_input("Primary Keyword (Leave empty for AI Auto-Discovery)", value=st.session_state.mode1_kw, placeholder="e.g. best seo tips")
 
     run_btn = st.button("🚀 Run Autonomous Audit", type="primary", use_container_width=True)
 
@@ -251,9 +284,13 @@ if audit_mode == "🌐 Autonomous Live URL Audit":
             with st.status("Running Autonomous Multi-Engine Audit...", expanded=True) as status:
                 st.write("🌐 Launching browser engine and extracting rendered DOM...")
                 fetch_res = crawler.fetch_html(target_url, use_browser=use_browser)
-                
-                if fetch_res["status_code"] >= 400 or not fetch_res["html"]:
-                    st.error(f"Failed to fetch {target_url} (HTTP {fetch_res['status_code']})")
+
+                if fetch_res.get("error") or fetch_res.get("status_code", 0) >= 400 or not fetch_res.get("html"):
+                    err_detail = fetch_res.get("error") or f"HTTP {fetch_res.get('status_code')}"
+                    status.update(label=f"Fetch failed: {err_detail}", state="error")
+                    st.error(f"❌ Could not retrieve `{target_url}` ({err_detail}).")
+                    if fetch_res.get("status_code") in (401, 403, 503):
+                        st.warning("🛡️ **Cloud Bot Protection / WAF Detected:** This website blocked incoming requests from cloud hosting servers (Cloudflare/Akamai). You can audit this exact article without obstacles by copying its text into **✍️ Manual Content Draft** mode!")
                 else:
                     st.write(f"✅ Loaded page in {fetch_res['load_time_sec']}s using {fetch_res['engine']}")
                     st.write("🔍 Parsing DOM, Headings, Schema JSON-LD, Images, Links & Readability...")
@@ -298,37 +335,88 @@ if audit_mode == "🌐 Autonomous Live URL Audit":
 # -----------------------------------------------------------------------------
 elif audit_mode == "⚔️ Competitor Battle Mode":
     st.subheader("⚔️ Head-to-Head Competitor Gap Matrix")
-    st.write("Compare your blog post directly against a ranking competitor to spot exact topical and structural advantages.")
+    st.caption("Compare your blog post directly against a ranking competitor to spot exact topical, heading, and structural gaps.")
+
+    if "battle_url_1" not in st.session_state:
+        st.session_state.battle_url_1 = ""
+    if "battle_url_2" not in st.session_state:
+        st.session_state.battle_url_2 = ""
+    if "battle_kw" not in st.session_state:
+        st.session_state.battle_kw = ""
+
+    b_demo_c1, b_demo_c2 = st.columns([3, 1])
+    with b_demo_c2:
+        if st.button("✨ Load Demo Battle", use_container_width=True, help="Load two sample URLs for instant battle testing"):
+            st.session_state.battle_url_1 = "https://en.wikipedia.org/wiki/Search_engine_optimization"
+            st.session_state.battle_url_2 = "https://en.wikipedia.org/wiki/Web_crawler"
+            st.session_state.battle_kw = "search engine"
+            st.rerun()
+
     col_a, col_b = st.columns(2)
     with col_a:
-        your_url = st.text_input("Your Blog URL", placeholder="https://yoursite.com/blog/my-guide")
+        your_url = st.text_input("Your Blog URL", value=st.session_state.battle_url_1, placeholder="https://yoursite.com/blog/my-guide")
     with col_b:
-        comp_url = st.text_input("Competitor Blog URL", placeholder="https://competitor.com/blog/their-guide")
-    battle_keyword = st.text_input("Shared Target Keyword", placeholder="e.g. cloud security best practices")
+        comp_url = st.text_input("Competitor Blog URL", value=st.session_state.battle_url_2, placeholder="https://competitor.com/blog/their-guide")
+    battle_keyword = st.text_input("Shared Target Keyword", value=st.session_state.battle_kw, placeholder="e.g. search engine")
 
     battle_btn = st.button("⚔️ Launch Head-to-Head Battle", type="primary", use_container_width=True)
 
     if battle_btn:
-        if not your_url or not comp_url:
+        if not your_url.strip() or not comp_url.strip():
             st.error("Please enter both URLs to run the comparison.")
         else:
             with st.status("Auditing both articles in parallel...", expanded=True) as status:
-                st.write("Fetching Your Post...")
+                st.write(f"🔄 Fetching Your Post: `{your_url}`...")
                 fetch_1 = crawler.fetch_html(your_url, use_browser=use_browser)
-                data_1 = crawler.parse_page_data(fetch_1)
-                audit_1 = audit_engine.audit_page(data_1, keyword=battle_keyword)
+                err_1 = fetch_1.get("error") or f"HTTP {fetch_1.get('status_code', 0)}"
+                if fetch_1.get("error") or fetch_1.get("status_code", 0) >= 400 or not fetch_1.get("html"):
+                    status.update(label=f"Failed to fetch Your URL: {err_1}", state="error")
+                    st.error(f"❌ Could not crawl Your Blog URL: {err_1}")
+                else:
+                    data_1 = crawler.parse_page_data(fetch_1)
+                    kw_1 = battle_keyword.strip() or data_1.get("suggested_keyword")
+                    audit_1 = audit_engine.audit_page(data_1, keyword=kw_1)
 
-                st.write("Fetching Competitor Post...")
-                fetch_2 = crawler.fetch_html(comp_url, use_browser=use_browser)
-                data_2 = crawler.parse_page_data(fetch_2)
-                audit_2 = audit_engine.audit_page(data_2, keyword=battle_keyword)
+                    st.write(f"🔄 Fetching Competitor Post: `{comp_url}`...")
+                    fetch_2 = crawler.fetch_html(comp_url, use_browser=use_browser)
+                    err_2 = fetch_2.get("error") or f"HTTP {fetch_2.get('status_code', 0)}"
+                    if fetch_2.get("error") or fetch_2.get("status_code", 0) >= 400 or not fetch_2.get("html"):
+                        status.update(label=f"Failed to fetch Competitor URL: {err_2}", state="error")
+                        st.error(f"❌ Could not crawl Competitor Blog URL: {err_2}")
+                    else:
+                        data_2 = crawler.parse_page_data(fetch_2)
+                        kw_2 = battle_keyword.strip() or data_2.get("suggested_keyword")
+                        audit_2 = audit_engine.audit_page(data_2, keyword=kw_2)
 
-                st.session_state.battle_data = {
-                    "your": {"data": data_1, "audit": audit_1},
-                    "comp": {"data": data_2, "audit": audit_2},
-                    "keyword": battle_keyword,
-                }
-                status.update(label="Battle comparison generated!", state="complete")
+                        st.session_state.battle_data = {
+                            "your": {"data": data_1, "audit": audit_1},
+                            "comp": {"data": data_2, "audit": audit_2},
+                            "keyword": battle_keyword,
+                        }
+
+                        # Insert both records so user can inspect the full 11-tab scorecard for each!
+                        st.session_state.results.insert(0, {
+                            "type": "Competitor Battle",
+                            "url": comp_url,
+                            "title": f"⚔️ [Competitor] {data_2['title']}",
+                            "keyword": kw_2,
+                            "page_data": data_2,
+                            "audit": audit_2,
+                            "serp": None,
+                            "pagespeed": None,
+                        })
+                        st.session_state.results.insert(0, {
+                            "type": "Competitor Battle",
+                            "url": your_url,
+                            "title": f"⚔️ [Your Post] {data_1['title']}",
+                            "keyword": kw_1,
+                            "page_data": data_1,
+                            "audit": audit_1,
+                            "serp": None,
+                            "pagespeed": None,
+                        })
+                        status.update(label="Battle comparison & full audits generated!", state="complete")
+                        st.success("⚔️ Battle completed! Review the comparison matrix below and inspect each article in the 11-Tab Inspection Dashboard at the bottom.")
 
     if "battle_data" in st.session_state:
         b = st.session_state.battle_data
@@ -366,20 +454,42 @@ elif audit_mode == "⚔️ Competitor Battle Mode":
         hcol1, hcol2 = st.columns(2)
         with hcol1:
             st.markdown("**Your H2 Headings:**")
-            for h in y_d["h2_list"]:
-                st.write(f"- {h}")
+            if y_d.get("h2_list"):
+                for h in y_d["h2_list"]:
+                    st.write(f"- {h}")
+            else:
+                st.caption("No H2 headings detected.")
         with hcol2:
             st.markdown("**Competitor H2 Headings (Topics you might have missed):**")
-            for h in c_d["h2_list"]:
-                st.write(f"- {h}")
+            if c_d.get("h2_list"):
+                for h in c_d["h2_list"]:
+                    st.write(f"- {h}")
+            else:
+                st.caption("No H2 headings detected.")
 
 # -----------------------------------------------------------------------------
 # MODE 3: Batch / Multi-URL Audit
 # -----------------------------------------------------------------------------
 elif audit_mode == "📑 Batch / Multi-URL Audit":
     st.subheader("📑 Batch URL Crawler & Site-Wide Audit")
+    st.caption("Audit multiple published URLs in one sequential pipeline to identify site-wide content health and ranking readiness.")
+
+    if "batch_urls_input" not in st.session_state:
+        st.session_state.batch_urls_input = ""
+
+    b_demo_c1, b_demo_c2 = st.columns([3, 1])
+    with b_demo_c2:
+        if st.button("✨ Load Demo Batch URLs", use_container_width=True, help="Populate with 3 sample articles for quick batch testing"):
+            st.session_state.batch_urls_input = (
+                "https://en.wikipedia.org/wiki/Search_engine_optimization\n"
+                "https://en.wikipedia.org/wiki/Web_crawler\n"
+                "https://en.wikipedia.org/wiki/PageRank"
+            )
+            st.rerun()
+
     urls_input = st.text_area(
         "Enter URLs (one per line):",
+        value=st.session_state.batch_urls_input,
         placeholder="https://example.com/blog-1\nhttps://example.com/blog-2\nhttps://example.com/blog-3",
         height=150
     )
@@ -390,41 +500,100 @@ elif audit_mode == "📑 Batch / Multi-URL Audit":
         if not urls:
             st.error("Please enter at least one URL.")
         else:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            for idx, u in enumerate(urls):
-                status_text.text(f"Auditing ({idx+1}/{len(urls)}): {u}")
-                fetch_res = crawler.fetch_html(u, use_browser=use_browser)
-                if fetch_res["status_code"] < 400 and fetch_res["html"]:
-                    p_data = crawler.parse_page_data(fetch_res)
-                    a_res = audit_engine.audit_page(p_data)
-                    st.session_state.results.insert(0, {
-                        "type": "Batch",
-                        "url": u,
-                        "title": p_data["title"],
-                        "keyword": a_res["keyword"],
-                        "page_data": p_data,
-                        "audit": a_res,
-                        "serp": None,
-                        "pagespeed": None,
-                    })
-                progress_bar.progress((idx + 1) / len(urls))
-            status_text.success("Batch audit completed!")
-            st.rerun()
+            success_count = 0
+            failed_items = []
+            with st.status(f"Auditing {len(urls)} URLs in batch...", expanded=True) as status:
+                progress_bar = st.progress(0)
+                for idx, u in enumerate(urls):
+                    st.write(f"🔄 ({idx+1}/{len(urls)}) Auditing: `{u}`")
+                    fetch_res = crawler.fetch_html(u, use_browser=use_browser)
+                    if not fetch_res.get("error") and fetch_res.get("status_code", 0) < 400 and fetch_res.get("html"):
+                        p_data = crawler.parse_page_data(fetch_res)
+                        a_res = audit_engine.audit_page(p_data)
+                        st.session_state.results.insert(0, {
+                            "type": "Batch",
+                            "url": u,
+                            "title": p_data["title"],
+                            "keyword": a_res["keyword"],
+                            "page_data": p_data,
+                            "audit": a_res,
+                            "serp": None,
+                            "pagespeed": None,
+                        })
+                        success_count += 1
+                        st.write(f"✅ Success: **{p_data['title']}** (Score: {a_res['overall_score']}/100)")
+                    else:
+                        err_msg = fetch_res.get("error") or f"HTTP {fetch_res.get('status_code')}"
+                        failed_items.append((u, err_msg))
+                        st.write(f"⚠️ Failed: `{u}` ({err_msg})")
+                    progress_bar.progress((idx + 1) / len(urls))
+
+                final_label = f"Batch completed: {success_count} succeeded, {len(failed_items)} failed."
+                status.update(label=final_label, state="complete" if success_count > 0 else "error")
+
+            if success_count > 0:
+                st.success(f"🎉 Successfully audited {success_count} article(s)! Select any article from the dashboard below to view its 11-tab scorecard.")
+            if failed_items:
+                with st.expander(f"⚠️ {len(failed_items)} URL(s) could not be crawled", expanded=True):
+                    for u, err in failed_items:
+                        st.markdown(f"- `{u}`: **{err}**")
+                    st.info("💡 **Note:** Websites blocking automated cloud crawlers can be audited directly via **✍️ Manual Content Draft** mode.")
 
 # -----------------------------------------------------------------------------
 # MODE 4: Manual Content Draft
 # -----------------------------------------------------------------------------
 elif audit_mode == "✍️ Manual Content Draft":
     st.subheader("✍️ Draft & Pre-Publish Manual Audit")
+    st.caption("Audit unpublished content drafts before publishing. Uncover run-on sentences, jargon, typos, wordy redundancies, E-E-A-T gaps, and headline alignment with 0 dependency on live web access.")
+
+    SAMPLE_DRAFT_TITLE = "Mastering Modern Technical SEO for High-Impact Search Rankings"
+    SAMPLE_DRAFT_KW = "technical seo"
+    SAMPLE_DRAFT_AUTHOR = "Alex Taylor"
+    SAMPLE_DRAFT_TEXT = """# Mastering Modern Technical SEO for High-Impact Search Rankings
+
+In the modern digital ecosystem, technical seo is the absolute bedrock upon which all organic growth strategies must be meticulously constructed and continually optimized. Due to the fact that search engine algorithms are becoming extraordinarily sophisticated, understanding how crawlers index and interpret structured web architecture has become more paramount than ever before for marketing teams across the globe.
+
+## Why Technical Architecture Determines Organic Visibility
+
+In this day and age, search engines prioritize websites that demonstrate fast load velocity, impeccable mobile responsiveness, and clean semantic markup. A study was conducted by leading web engineers which verified that pages loading in under two seconds achieve significantly higher conversion rates and superior user retention.
+
+According to Google search advocates, Core Web Vitals directly influence ranking signals. Furthermore, if your site architecture suffers from deep crawl depth or fragmented internal link paths, search bots will deplete their crawl budget before discovering your high-value commercial landing pages.
+
+## Key Pillars of a Modern Technical SEO Audit
+
+1. **Crawlability and Indexability**: Ensure your robots.txt does not inadvertently block critical CSS or JavaScript assets that render the page layout.
+2. **Canonicalization**: Eliminate duplicate content risks across HTTP, HTTPS, trailing slashes, and parameterized query strings.
+3. **Structured Data Markup**: Implement Article, FAQPage, and BreadcrumbList schemas to earn rich snippets on Google SERPs.
+
+In order to optimize your technical seo performance, audit your XML sitemaps regularly, rectify broken 404 links, and maintain clean canonical tags. In the event that server latency spikes, implement edge caching and content delivery networks immediately.
+"""
+
+    if "draft_title_val" not in st.session_state:
+        st.session_state.draft_title_val = ""
+    if "draft_text_val" not in st.session_state:
+        st.session_state.draft_text_val = ""
+    if "draft_kw_val" not in st.session_state:
+        st.session_state.draft_kw_val = ""
+    if "draft_author_val" not in st.session_state:
+        st.session_state.draft_author_val = ""
+
+    d_demo_c1, d_demo_c2 = st.columns([3, 1])
+    with d_demo_c2:
+        if st.button("✨ Load Sample Draft", use_container_width=True, help="Load an article draft designed to test all audit metrics"):
+            st.session_state.draft_title_val = SAMPLE_DRAFT_TITLE
+            st.session_state.draft_text_val = SAMPLE_DRAFT_TEXT
+            st.session_state.draft_kw_val = SAMPLE_DRAFT_KW
+            st.session_state.draft_author_val = SAMPLE_DRAFT_AUTHOR
+            st.rerun()
+
     d_col1, d_col2 = st.columns([3, 2])
     with d_col1:
-        draft_title = st.text_input("Draft Title", placeholder="The Complete Guide to Technical SEO in 2026")
-        draft_text = st.text_area("Blog Content (Paste raw text or Markdown)", height=300, placeholder="Paste your article draft here...")
+        draft_title = st.text_input("Draft Title", value=st.session_state.draft_title_val, placeholder="The Complete Guide to Technical SEO in 2026")
+        draft_text = st.text_area("Blog Content (Paste raw text or Markdown)", value=st.session_state.draft_text_val, height=300, placeholder="Paste your article draft here...")
     with d_col2:
-        draft_kw = st.text_input("Focus Keyword", placeholder="technical seo guide")
-        draft_author = st.text_input("Writer / Author", placeholder="Jane Doe")
-        draft_btn = st.button("Audit Draft", type="primary", use_container_width=True)
+        draft_kw = st.text_input("Focus Keyword", value=st.session_state.draft_kw_val, placeholder="technical seo")
+        draft_author = st.text_input("Writer / Author", value=st.session_state.draft_author_val, placeholder="Alex Taylor")
+        draft_btn = st.button("🚀 Audit Draft Content", type="primary", use_container_width=True)
 
     if draft_btn:
         if not draft_text.strip():
@@ -438,14 +607,6 @@ elif audit_mode == "✍️ Manual Content Draft":
             h2_matches = re.findall(r"(?im)^##\s+(.+)$|<h2\b[^>]*>(.+?)</h2>", draft_text)
             h2_list = [m[0] or m[1] for m in h2_matches]
 
-            mock_fetch = {
-                "url": "draft://local",
-                "final_url": "draft://local",
-                "status_code": 200,
-                "load_time_sec": 0.0,
-                "engine": "Manual Draft",
-                "html": draft_text,
-            }
             mock_data = {
                 "url": "Draft Article",
                 "final_url": "Draft Article",
@@ -496,6 +657,7 @@ elif audit_mode == "✍️ Manual Content Draft":
                 "serp": None,
                 "pagespeed": None,
             })
+            st.success("✅ Draft audited successfully! View the full scorecard below.")
             st.rerun()
 
 
@@ -513,19 +675,20 @@ else:
     for idx, r in enumerate(st.session_state.results):
         summary_rows.append({
             "Index": idx + 1,
-            "Title": r["title"][:50] + ("..." if len(r["title"]) > 50 else ""),
+            "Mode": r.get("type", "Audit"),
+            "Title": r["title"][:45] + ("..." if len(r["title"]) > 45 else ""),
             "Keyword": r["keyword"] or "Auto-detected",
             "Words": r["audit"]["word_count"],
             "Score": f"{r['audit']['overall_score']}/100",
             "Status": r["audit"]["status"],
-            "URL": r["url"][:40] + "...",
+            "URL": r["url"][:35] + ("..." if len(r["url"]) > 35 else ""),
         })
     st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
 
     selected_idx = st.selectbox(
         "Inspect Audit Report:",
         range(len(st.session_state.results)),
-        format_func=lambda i: f"#{i+1}: {st.session_state.results[i]['title']} (Score: {st.session_state.results[i]['audit']['overall_score']})"
+        format_func=lambda i: f"#{i+1}: [{st.session_state.results[i].get('type', 'Audit')}] {st.session_state.results[i]['title']} (Score: {st.session_state.results[i]['audit']['overall_score']})"
     )
 
     current = st.session_state.results[selected_idx]

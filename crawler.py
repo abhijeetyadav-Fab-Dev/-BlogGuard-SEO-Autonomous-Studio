@@ -187,19 +187,53 @@ def fetch_html(url, use_browser=True, timeout=20):
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
+                "Chrome/128.0.0.0 Safari/537.36"
             ),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Sec-Ch-Ua": '"Not-A.Brand";v="99", "Chromium";v="124"',
+            "Referer": "https://www.google.com/",
+            "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": '"Windows"',
+            "Upgrade-Insecure-Requests": "1",
         }
-        res = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        status_code = res.status_code
-        final_url = str(res.url)
-        html = res.text
-        engine_used = "High-Fidelity HTTP"
+        
+        session = requests.Session()
+        error_msg = ""
+        try:
+            res = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            status_code = res.status_code
+            final_url = str(res.url)
+            html = res.text or ""
+            engine_used = "High-Fidelity HTTP"
+
+            # If blocked with 403 / 401 or empty on cloud hosts (Render), retry with Bot bypass
+            if status_code in (401, 403, 503) or len(html.strip()) < 200:
+                bot_headers = {
+                    "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+                    "Accept": "*/*",
+                }
+                res_retry = session.get(url, headers=bot_headers, timeout=timeout, allow_redirects=True)
+                if res_retry.status_code < 400 and len(res_retry.text) > len(html):
+                    status_code = res_retry.status_code
+                    final_url = str(res_retry.url)
+                    html = res_retry.text
+                    engine_used = "HTTP (Verified Bot Fallback)"
+        except requests.exceptions.SSLError:
+            try:
+                res = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=False)
+                status_code = res.status_code
+                final_url = str(res.url)
+                html = res.text or ""
+                engine_used = "HTTP (SSL Fallback)"
+            except Exception as e:
+                status_code = 500
+                error_msg = f"SSL Error: {str(e)}"
+                html = ""
+        except Exception as e:
+            status_code = 500
+            error_msg = f"Network Connection Error: {str(e)}"
+            html = ""
 
     load_time = round(time.time() - start_time, 2)
     return {
@@ -209,6 +243,7 @@ def fetch_html(url, use_browser=True, timeout=20):
         "status_code": status_code,
         "load_time_sec": load_time,
         "engine": engine_used,
+        "error": error_msg if not html else "",
     }
 
 
