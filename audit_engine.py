@@ -825,6 +825,7 @@ def audit_page(data, keyword=None, writer=None):
         "external_links_count": ext_count,
         "citations_count": len(citation_links),
         "long_sentences_count": len(long_sentences),
+        "yoast": evaluate_yoast_seo(data, keyword=keyword),
     }
 
 
@@ -933,4 +934,687 @@ def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=No
         out_paragraphs.append(f"<p style='margin-bottom: 16px; line-height: 1.8; color: #1e293b;'>{' '.join(p_html_parts)}</p>")
 
     return "\n".join(out_paragraphs)
+
+
+# ---------------------------------------------------------------------------
+# 5. YOAST SEO OFFICIAL CRITERIA & READABILITY SCORING ENGINE
+# ---------------------------------------------------------------------------
+YOAST_TRANSITION_WORDS = {
+    "above all", "accordingly", "additionally", "after all", "afterward", "afterwards",
+    "also", "alternatively", "although", "and yet", "as a consequence", "as a matter of fact",
+    "as a result", "as an illustration", "as well as", "at the same time", "besides",
+    "certainly", "clearly", "consequently", "conversely", "correspondingly", "despite",
+    "differently", "due to", "earlier", "especially", "even if", "even so", "even though",
+    "evidently", "finally", "first", "first of all", "firstly", "for example", "for instance",
+    "for one thing", "for that reason", "for this reason", "further", "furthermore",
+    "hence", "however", "in addition", "in brief", "in case", "in conclusion",
+    "in contrast", "in fact", "in general", "in order to", "in other words",
+    "in particular", "in short", "in summary", "in the end", "in the first place",
+    "in the meantime", "in the same way", "in truth", "indeed", "initially",
+    "instead", "last but not least", "lastly", "later", "likewise", "meanwhile",
+    "moreover", "naturally", "nevertheless", "next", "nonetheless", "not only",
+    "notably", "obviously", "on the contrary", "on the one hand", "on the other hand",
+    "otherwise", "overall", "particularly", "rather", "regardless", "second",
+    "secondly", "similarly", "simultaneously", "since", "so", "specifically",
+    "still", "subsequently", "such as", "that is to say", "then", "therefore",
+    "third", "thirdly", "this is why", "though", "thus", "to begin with",
+    "to clarify", "to conclude", "to illustrate", "to put it another way",
+    "to sum up", "to summarize", "undoubtedly", "whereas", "while", "yet"
+}
+
+
+def evaluate_yoast_seo(page_data, keyword=None):
+    """
+    Evaluates article data against Yoast SEO's 14 Focus Keyphrase Criteria
+    and 7 Readability Criteria, returning traffic lights (good, ok, bad) and scores.
+    """
+    kw = (keyword or page_data.get("suggested_keyword") or "").strip().lower()
+    title = page_data.get("title", "")
+    title_lower = title.lower()
+    meta_desc = page_data.get("meta_description", "")
+    url = page_data.get("url", "") or page_data.get("final_url", "")
+    clean_text = page_data.get("clean_text", "")
+    text_lower = clean_text.lower()
+    words = page_data.get("words", [])
+    word_count = len(words) or len(re.findall(r"\b[\w'-]+\b", clean_text))
+    sentences = [s.strip() for s in re.split(r"[.!?]+", clean_text) if s.strip()]
+    sentence_count = len(sentences) or 1
+    h1_list = page_data.get("h1_list", [])
+    h2_list = page_data.get("h2_list", [])
+    h3_list = page_data.get("h3_list", [])
+    all_subheadings = h2_list + h3_list
+    images = page_data.get("images", [])
+    internal_links_count = page_data.get("internal_links_count", 0)
+    citation_links = page_data.get("citation_links", [])
+    external_links_count = page_data.get("external_links_count", 0) + len(citation_links)
+
+    kw_words = len(kw.split()) if kw else 0
+
+    # -------------------------------------------------------------------------
+    # PART 1: 14 YOAST SEO (KEYPHRASE) CRITERIA
+    # -------------------------------------------------------------------------
+    seo_items = []
+
+    # 1. Keyphrase in SEO Title
+    if not kw:
+        seo_items.append({
+            "name": "Focus Keyphrase",
+            "status": "bad",
+            "title": "Keyphrase in Title",
+            "feedback": "No focus keyphrase specified. Set a keyphrase to enable full Yoast analysis.",
+            "recommendation": "Provide a target focus keyphrase for this article."
+        })
+    elif kw in title_lower:
+        seo_items.append({
+            "name": "Keyphrase in Title",
+            "status": "good",
+            "title": "Keyphrase in SEO Title",
+            "feedback": f"The focus keyphrase '{kw}' appears in the SEO title.",
+            "recommendation": "Maintain keyphrase relevance in future revisions."
+        })
+    else:
+        seo_items.append({
+            "name": "Keyphrase in Title",
+            "status": "bad",
+            "title": "Keyphrase in SEO Title",
+            "feedback": f"The focus keyphrase '{kw}' does not appear in the SEO title.",
+            "recommendation": f"Add '{kw}' to your SEO title tag."
+        })
+
+    # 2. Keyphrase at beginning of SEO Title
+    if kw and kw in title_lower:
+        idx = title_lower.find(kw)
+        if idx <= len(title) * 0.45:
+            seo_items.append({
+                "name": "Keyphrase at Title Start",
+                "status": "good",
+                "title": "Keyphrase at Beginning of Title",
+                "feedback": "The focus keyphrase appears at or near the beginning of the SEO title.",
+                "recommendation": "Great for search engine crawlers and click-through visibility."
+            })
+        else:
+            seo_items.append({
+                "name": "Keyphrase at Title Start",
+                "status": "ok",
+                "title": "Keyphrase at Beginning of Title",
+                "feedback": "The keyphrase appears in the title, but not near the beginning.",
+                "recommendation": "Move the focus keyphrase closer to the front of the title."
+            })
+    elif kw:
+        seo_items.append({
+            "name": "Keyphrase at Title Start",
+            "status": "bad",
+            "title": "Keyphrase at Beginning of Title",
+            "feedback": "The focus keyphrase is not in the title at all.",
+            "recommendation": "Place the focus keyphrase at the start of your SEO title."
+        })
+
+    # 3. SEO Title Width / Length
+    t_len = len(title)
+    if 35 <= t_len <= 65:
+        seo_items.append({
+            "name": "Title Width",
+            "status": "good",
+            "title": "SEO Title Length",
+            "feedback": f"The SEO title is {t_len} characters long (optimal: 35-65 characters).",
+            "recommendation": "Title fits Google desktop and mobile search snippets perfectly."
+        })
+    elif 25 <= t_len < 35 or 66 <= t_len <= 75:
+        seo_items.append({
+            "name": "Title Width",
+            "status": "ok",
+            "title": "SEO Title Length",
+            "feedback": f"The SEO title is {t_len} characters long.",
+            "recommendation": "Optimal snippet length is 35-65 characters to prevent truncation."
+        })
+    else:
+        seo_items.append({
+            "name": "Title Width",
+            "status": "bad",
+            "title": "SEO Title Length",
+            "feedback": f"The SEO title is {t_len} characters long (too {'short' if t_len < 25 else 'long'}).",
+            "recommendation": "Adjust title length to 35-65 characters."
+        })
+
+    # 4. Keyphrase in Meta Description
+    if not meta_desc:
+        seo_items.append({
+            "name": "Keyphrase in Meta Description",
+            "status": "bad",
+            "title": "Keyphrase in Meta Description",
+            "feedback": "No meta description has been specified.",
+            "recommendation": "Add a meta description containing your focus keyphrase."
+        })
+    elif kw and kw in meta_desc.lower():
+        seo_items.append({
+            "name": "Keyphrase in Meta Description",
+            "status": "good",
+            "title": "Keyphrase in Meta Description",
+            "feedback": f"The focus keyphrase '{kw}' appears in the meta description.",
+            "recommendation": "Well done. Google often bolds matching keyphrases in SERP snippets."
+        })
+    else:
+        seo_items.append({
+            "name": "Keyphrase in Meta Description",
+            "status": "bad",
+            "title": "Keyphrase in Meta Description",
+            "feedback": f"The focus keyphrase '{kw}' does not appear in the meta description.",
+            "recommendation": f"Include '{kw}' naturally inside your meta description."
+        })
+
+    # 5. Meta Description Length
+    m_len = len(meta_desc)
+    if 120 <= m_len <= 156:
+        seo_items.append({
+            "name": "Meta Description Length",
+            "status": "good",
+            "title": "Meta Description Length",
+            "feedback": f"Meta description is {m_len} characters (optimal: 120-156).",
+            "recommendation": "Fits desktop and mobile SERPs without truncation."
+        })
+    elif 80 <= m_len < 120 or 157 <= m_len <= 175:
+        seo_items.append({
+            "name": "Meta Description Length",
+            "status": "ok",
+            "title": "Meta Description Length",
+            "feedback": f"Meta description is {m_len} characters.",
+            "recommendation": "Aim for 120-156 characters for optimal SERP display."
+        })
+    else:
+        seo_items.append({
+            "name": "Meta Description Length",
+            "status": "bad",
+            "title": "Meta Description Length",
+            "feedback": f"Meta description is {m_len} characters ({'missing' if m_len == 0 else ('too short' if m_len < 80 else 'too long')}).",
+            "recommendation": "Write a concise meta description between 120 and 156 characters."
+        })
+
+    # 6. Keyphrase in URL Slug
+    url_slug = url.split("?")[0].rstrip("/").split("/")[-1].lower() if url else ""
+    if kw and all(word in url_slug for word in kw.split()):
+        seo_items.append({
+            "name": "Keyphrase in Slug",
+            "status": "good",
+            "title": "Keyphrase in URL Slug",
+            "feedback": f"All focus keyphrase terms appear in the URL slug ('{url_slug}').",
+            "recommendation": "Clean and descriptive permalink structure."
+        })
+    elif kw and any(word in url_slug for word in kw.split() if len(word) > 3):
+        seo_items.append({
+            "name": "Keyphrase in Slug",
+            "status": "ok",
+            "title": "Keyphrase in URL Slug",
+            "feedback": f"Part of the keyphrase appears in the URL slug ('{url_slug}').",
+            "recommendation": "Include the complete focus keyphrase in your permalink slug."
+        })
+    else:
+        seo_items.append({
+            "name": "Keyphrase in Slug",
+            "status": "bad",
+            "title": "Keyphrase in URL Slug",
+            "feedback": "The focus keyphrase does not appear in the URL slug.",
+            "recommendation": f"Include '{kw}' in the URL permalink slug."
+        })
+
+    # 7. Keyphrase in Introduction
+    first_paragraph = clean_text[:600].lower()
+    if kw and kw in first_paragraph:
+        seo_items.append({
+            "name": "Keyphrase in Intro",
+            "status": "good",
+            "title": "Keyphrase in Introduction",
+            "feedback": "Your focus keyphrase appears in the introductory paragraph.",
+            "recommendation": "Strong topical signal established in the opening section."
+        })
+    else:
+        seo_items.append({
+            "name": "Keyphrase in Intro",
+            "status": "bad",
+            "title": "Keyphrase in Introduction",
+            "feedback": "The focus keyphrase does not appear in the first paragraph.",
+            "recommendation": f"Include '{kw}' in the very first 1-2 sentences of the article."
+        })
+
+    # 8. Keyphrase Density
+    if kw and word_count > 0:
+        kw_matches = len(re.findall(rf"\b{re.escape(kw)}\b", text_lower))
+        density = round((kw_matches * kw_words / word_count) * 100, 2)
+        if 0.5 <= density <= 3.0:
+            seo_items.append({
+                "name": "Keyphrase Density",
+                "status": "good",
+                "title": "Keyphrase Density",
+                "feedback": f"The focus keyphrase occurs {kw_matches} times ({density}%). Great balance.",
+                "recommendation": "Neither under-optimized nor keyword stuffed."
+            })
+        elif (0.3 <= density < 0.5) or (3.0 < density <= 3.5):
+            seo_items.append({
+                "name": "Keyphrase Density",
+                "status": "ok",
+                "title": "Keyphrase Density",
+                "feedback": f"Keyphrase occurs {kw_matches} times ({density}%).",
+                "recommendation": "Aim for keyphrase density between 0.5% and 3.0%."
+            })
+        else:
+            seo_items.append({
+                "name": "Keyphrase Density",
+                "status": "bad",
+                "title": "Keyphrase Density",
+                "feedback": f"Keyphrase density is {density}% ({kw_matches} occurrences in {word_count} words).",
+                "recommendation": f"{'Increase mentions of' if density < 0.3 else 'Reduce over-use of'} '{kw}' to achieve 0.5%–3.0%."
+            })
+    else:
+        seo_items.append({
+            "name": "Keyphrase Density",
+            "status": "bad",
+            "title": "Keyphrase Density",
+            "feedback": "Cannot calculate keyphrase density without target keyword and content.",
+            "recommendation": "Define a focus keyword."
+        })
+
+    # 9. Keyphrase in Subheadings (H2 / H3)
+    if all_subheadings:
+        matching_subs = [h for h in all_subheadings if kw and kw in h.lower()]
+        sub_ratio = len(matching_subs) / len(all_subheadings)
+        if 0.30 <= sub_ratio <= 0.75:
+            seo_items.append({
+                "name": "Keyphrase in Subheadings",
+                "status": "good",
+                "title": "Keyphrase in Subheadings",
+                "feedback": f"{len(matching_subs)} of {len(all_subheadings)} subheadings ({round(sub_ratio*100)}%) contain your focus keyphrase.",
+                "recommendation": "Optimal subheading topical alignment."
+            })
+        elif len(matching_subs) > 0:
+            seo_items.append({
+                "name": "Keyphrase in Subheadings",
+                "status": "ok",
+                "title": "Keyphrase in Subheadings",
+                "feedback": f"{len(matching_subs)} of {len(all_subheadings)} subheadings contain your focus keyphrase ({round(sub_ratio*100)}%).",
+                "recommendation": "Recommended target is between 30% and 75% of H2/H3 subheadings."
+            })
+        else:
+            seo_items.append({
+                "name": "Keyphrase in Subheadings",
+                "status": "bad",
+                "title": "Keyphrase in Subheadings",
+                "feedback": f"None of your {len(all_subheadings)} subheadings contain the focus keyphrase.",
+                "recommendation": f"Add '{kw}' to at least one or two H2 subheadings."
+            })
+    else:
+        seo_items.append({
+            "name": "Keyphrase in Subheadings",
+            "status": "bad",
+            "title": "Keyphrase in Subheadings",
+            "feedback": "No H2 or H3 subheadings found in article.",
+            "recommendation": "Organize your article into distinct sections using H2 subheadings."
+        })
+
+    # 10. Image Alt Attributes
+    if images:
+        missing_alt = len([img for img in images if not img.get("has_alt") and not img.get("alt")])
+        kw_alt = len([img for img in images if kw and kw in (img.get("alt") or "").lower()])
+        if missing_alt == 0 and kw_alt > 0:
+            seo_items.append({
+                "name": "Image Alt Attributes",
+                "status": "good",
+                "title": "Image Alt Attributes",
+                "feedback": f"All {len(images)} images have alt attributes, and {kw_alt} image(s) include the focus keyphrase.",
+                "recommendation": "Optimal accessibility and Google Image search indexing."
+            })
+        elif missing_alt == 0 and kw_alt == 0:
+            seo_items.append({
+                "name": "Image Alt Attributes",
+                "status": "ok",
+                "title": "Image Alt Attributes",
+                "feedback": f"All {len(images)} images have alt attributes, but none contain the focus keyphrase.",
+                "recommendation": f"Consider adding '{kw}' to an image alt tag that directly illustrates the topic."
+            })
+        else:
+            seo_items.append({
+                "name": "Image Alt Attributes",
+                "status": "bad",
+                "title": "Image Alt Attributes",
+                "feedback": f"{missing_alt} of {len(images)} image(s) are missing alt attributes.",
+                "recommendation": "Add descriptive alt attributes containing your keyphrase to all images."
+            })
+    else:
+        seo_items.append({
+            "name": "Image Alt Attributes",
+            "status": "bad",
+            "title": "Image Alt Attributes",
+            "feedback": "No images appear on this page.",
+            "recommendation": "Add at least one relevant image or graphic with descriptive alt text."
+        })
+
+    # 11. Internal Links
+    if internal_links_count >= 1:
+        seo_items.append({
+            "name": "Internal Links",
+            "status": "good",
+            "title": "Internal Links",
+            "feedback": f"Found {internal_links_count} internal link(s).",
+            "recommendation": "Great for establishing topic clusters and distributing PageRank."
+        })
+    else:
+        seo_items.append({
+            "name": "Internal Links",
+            "status": "bad",
+            "title": "Internal Links",
+            "feedback": "No internal links found on this page.",
+            "recommendation": "Add internal links pointing to relevant cornerstone content on your domain."
+        })
+
+    # 12. Outbound / External Links
+    if external_links_count >= 1:
+        seo_items.append({
+            "name": "Outbound Links",
+            "status": "good",
+            "title": "Outbound Links",
+            "feedback": f"Found {external_links_count} outbound link(s) / authoritative source citation(s).",
+            "recommendation": "Demonstrates research rigor and aids E-E-A-T trust signals."
+        })
+    else:
+        seo_items.append({
+            "name": "Outbound Links",
+            "status": "bad",
+            "title": "Outbound Links",
+            "feedback": "No outbound links found on this page.",
+            "recommendation": "Add at least one external link to an authoritative, trustworthy source."
+        })
+
+    # 13. Text Length
+    if word_count >= 300:
+        seo_items.append({
+            "name": "Text Length",
+            "status": "good",
+            "title": "Text Word Count",
+            "feedback": f"Text contains {word_count:,} words (exceeds the 300-word Yoast minimum).",
+            "recommendation": "Solid depth for search engine evaluation."
+        })
+    elif word_count >= 250:
+        seo_items.append({
+            "name": "Text Length",
+            "status": "ok",
+            "title": "Text Word Count",
+            "feedback": f"Text contains {word_count} words.",
+            "recommendation": "The recommended minimum is 300 words for standard blog posts."
+        })
+    else:
+        seo_items.append({
+            "name": "Text Length",
+            "status": "bad",
+            "title": "Text Word Count",
+            "feedback": f"Text contains {word_count} words (below 300-word minimum).",
+            "recommendation": "Expand your content with deeper insights to rank competitively."
+        })
+
+    # 14. Keyphrase Length
+    if 1 <= kw_words <= 4:
+        seo_items.append({
+            "name": "Keyphrase Length",
+            "status": "good",
+            "title": "Keyphrase Length",
+            "feedback": f"Keyphrase is {kw_words} word(s) long (optimal: 1-4 words).",
+            "recommendation": "Concise and focused search intent."
+        })
+    elif kw_words == 5:
+        seo_items.append({
+            "name": "Keyphrase Length",
+            "status": "ok",
+            "title": "Keyphrase Length",
+            "feedback": f"Keyphrase is {kw_words} words long.",
+            "recommendation": "Consider shortening slightly for broader search intent."
+        })
+    else:
+        seo_items.append({
+            "name": "Keyphrase Length",
+            "status": "bad",
+            "title": "Keyphrase Length",
+            "feedback": f"Keyphrase is {kw_words} words long ({'empty' if kw_words == 0 else 'too long'}).",
+            "recommendation": "Target focus keyphrases between 1 and 4 words."
+        })
+
+    # -------------------------------------------------------------------------
+    # PART 2: 7 YOAST READABILITY CRITERIA
+    # -------------------------------------------------------------------------
+    readability_items = []
+    read_data = page_data.get("readability", {})
+    flesch_score = read_data.get("flesch_reading_ease", 50.0)
+
+    # 1. Flesch Reading Ease
+    if flesch_score >= 60.0:
+        readability_items.append({
+            "name": "Flesch Reading Ease",
+            "status": "good",
+            "title": "Flesch Reading Ease",
+            "feedback": f"Score is {flesch_score:.1f} (conversational Grade 7-8 web standard).",
+            "recommendation": "Easy for standard web readers to scan and understand."
+        })
+    elif flesch_score >= 50.0:
+        readability_items.append({
+            "name": "Flesch Reading Ease",
+            "status": "ok",
+            "title": "Flesch Reading Ease",
+            "feedback": f"Score is {flesch_score:.1f} (fairly difficult).",
+            "recommendation": "Aim for a Flesch score of 60+ by shortening sentences and replacing jargon."
+        })
+    else:
+        readability_items.append({
+            "name": "Flesch Reading Ease",
+            "status": "bad",
+            "title": "Flesch Reading Ease",
+            "feedback": f"Score is {flesch_score:.1f} (difficult / college level).",
+            "recommendation": "Break up compound sentences and use conversational vocabulary."
+        })
+
+    # 2. Passive Voice Percentage
+    passive_info = detect_passive_voice(sentences)
+    pv_pct = passive_info.get("percentage", 0.0)
+    if pv_pct <= 10.0:
+        readability_items.append({
+            "name": "Passive Voice",
+            "status": "good",
+            "title": "Passive Voice Usage",
+            "feedback": f"{pv_pct:.1f}% of sentences contain passive voice (target: <= 10%).",
+            "recommendation": "Clear, direct, and active writing style."
+        })
+    elif pv_pct <= 15.0:
+        readability_items.append({
+            "name": "Passive Voice",
+            "status": "ok",
+            "title": "Passive Voice Usage",
+            "feedback": f"{pv_pct:.1f}% of sentences contain passive voice.",
+            "recommendation": "Reduce passive voice below 10% for punchier prose."
+        })
+    else:
+        readability_items.append({
+            "name": "Passive Voice",
+            "status": "bad",
+            "title": "Passive Voice Usage",
+            "feedback": f"{pv_pct:.1f}% of sentences contain passive voice (exceeds 10% target).",
+            "recommendation": "Rewrite passive sentences with direct subject-verb constructions."
+        })
+
+    # 3. Consecutive Sentences Check
+    consec_runs = 0
+    consec_words = []
+    first_words = []
+    for s in sentences:
+        s_words = re.findall(r"\b\w+\b", s)
+        if s_words:
+            first_words.append(s_words[0].lower())
+
+    for i in range(len(first_words) - 2):
+        if first_words[i] == first_words[i+1] == first_words[i+2]:
+            consec_runs += 1
+            consec_words.append(first_words[i])
+
+    if consec_runs == 0:
+        readability_items.append({
+            "name": "Consecutive Sentences",
+            "status": "good",
+            "title": "Consecutive Sentences",
+            "feedback": "The text contains zero runs of 3+ consecutive sentences starting with the same word.",
+            "recommendation": "Great sentence variety."
+        })
+    else:
+        readability_items.append({
+            "name": "Consecutive Sentences",
+            "status": "bad",
+            "title": "Consecutive Sentences",
+            "feedback": f"Found {consec_runs} instance(s) where 3+ consecutive sentences start with the same word ('{', '.join(set(consec_words))}').",
+            "recommendation": "Vary your sentence starters to keep readers engaged."
+        })
+
+    # 4. Subheading Distribution (no section over 300 words without an H2/H3)
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", clean_text) if p.strip()]
+    if word_count > 300 and not all_subheadings:
+        readability_items.append({
+            "name": "Subheading Distribution",
+            "status": "bad",
+            "title": "Subheading Distribution",
+            "feedback": f"Text is {word_count} words but has 0 subheadings.",
+            "recommendation": "Add subheadings every 250-300 words to break up wall of text."
+        })
+    else:
+        readability_items.append({
+            "name": "Subheading Distribution",
+            "status": "good",
+            "title": "Subheading Distribution",
+            "feedback": f"Subheadings are distributed appropriately across the {word_count:,} words.",
+            "recommendation": "Clear visual signposts for readers."
+        })
+
+    # 5. Paragraph Length (no paragraph over 150 words)
+    long_paragraphs = [p for p in paragraphs if len(re.findall(r"\b[\w'-]+\b", p)) > 150]
+    if not long_paragraphs:
+        readability_items.append({
+            "name": "Paragraph Length",
+            "status": "good",
+            "title": "Paragraph Length",
+            "feedback": f"All {len(paragraphs)} paragraphs are under 150 words.",
+            "recommendation": "Bite-sized mobile friendly layout."
+        })
+    else:
+        readability_items.append({
+            "name": "Paragraph Length",
+            "status": "bad",
+            "title": "Paragraph Length",
+            "feedback": f"{len(long_paragraphs)} paragraph(s) contain more than 150 words.",
+            "recommendation": "Split long paragraphs into 2-3 shorter chunks."
+        })
+
+    # 6. Sentence Length (<= 25% of sentences contain > 20 words)
+    long_sentences = [s for s in sentences if len(re.findall(r"\b\w+\b", s)) > 20]
+    long_sent_pct = round((len(long_sentences) / sentence_count) * 100, 1)
+    if long_sent_pct <= 25.0:
+        readability_items.append({
+            "name": "Sentence Length",
+            "status": "good",
+            "title": "Sentence Length",
+            "feedback": f"{long_sent_pct}% of sentences contain more than 20 words (target: <= 25%).",
+            "recommendation": "Sentences are concise and easy to parse."
+        })
+    else:
+        readability_items.append({
+            "name": "Sentence Length",
+            "status": "bad",
+            "title": "Sentence Length",
+            "feedback": f"{long_sent_pct}% of sentences contain more than 20 words (exceeds 25% target).",
+            "recommendation": "Shorten long sentences by splitting clauses into independent sentences."
+        })
+
+    # 7. Transition Words (>= 30% of sentences contain transition words)
+    trans_count = 0
+    for s in sentences:
+        s_low = s.lower()
+        if any(re.search(rf"\b{re.escape(tw)}\b", s_low) for tw in YOAST_TRANSITION_WORDS):
+            trans_count += 1
+
+    trans_pct = round((trans_count / sentence_count) * 100, 1)
+    if trans_pct >= 30.0:
+        readability_items.append({
+            "name": "Transition Words",
+            "status": "good",
+            "title": "Transition Words Usage",
+            "feedback": f"{trans_pct}% of sentences contain transition words (exceeds 30% target).",
+            "recommendation": "Smooth narrative flow and logical progression."
+        })
+    elif trans_pct >= 20.0:
+        readability_items.append({
+            "name": "Transition Words",
+            "status": "ok",
+            "title": "Transition Words Usage",
+            "feedback": f"{trans_pct}% of sentences contain transition words.",
+            "recommendation": "Aim for at least 30% of sentences containing transition words (e.g. 'furthermore', 'however', 'as a result')."
+        })
+    else:
+        readability_items.append({
+            "name": "Transition Words",
+            "status": "bad",
+            "title": "Transition Words Usage",
+            "feedback": f"Only {trans_pct}% of sentences contain transition words (below 30% target).",
+            "recommendation": "Add transition phrases ('furthermore', 'however', 'consequently', 'for example') to improve reading flow."
+        })
+
+    # -------------------------------------------------------------------------
+    # PART 3: CALCULATE OVERALL TRAFFIC LIGHTS
+    # -------------------------------------------------------------------------
+    def _calc_score(items):
+        weights = {"good": 9, "ok": 6, "bad": 3}
+        if not items:
+            return 0, "bad"
+        total_pts = sum(weights[i["status"]] for i in items)
+        max_pts = len(items) * 9
+        score_pct = round((total_pts / max_pts) * 100)
+        avg = total_pts / len(items)
+        if avg >= 7.5:
+            verdict = "good"
+        elif avg >= 5.0:
+            verdict = "ok"
+        else:
+            verdict = "bad"
+        return score_pct, verdict
+
+    seo_pct, seo_verdict = _calc_score(seo_items)
+    read_pct, read_verdict = _calc_score(readability_items)
+
+    traffic_light_badges = {
+        "good": "🟢 Good",
+        "ok": "🟠 OK",
+        "bad": "🔴 Needs Improvement"
+    }
+
+    return {
+        "seo": {
+            "score": seo_pct,
+            "verdict": seo_verdict,
+            "badge": traffic_light_badges[seo_verdict],
+            "passed_count": len([i for i in seo_items if i["status"] == "good"]),
+            "ok_count": len([i for i in seo_items if i["status"] == "ok"]),
+            "bad_count": len([i for i in seo_items if i["status"] == "bad"]),
+            "total": len(seo_items),
+            "items": seo_items,
+        },
+        "readability": {
+            "score": read_pct,
+            "verdict": read_verdict,
+            "badge": traffic_light_badges[read_verdict],
+            "passed_count": len([i for i in readability_items if i["status"] == "good"]),
+            "ok_count": len([i for i in readability_items if i["status"] == "ok"]),
+            "bad_count": len([i for i in readability_items if i["status"] == "bad"]),
+            "total": len(readability_items),
+            "items": readability_items,
+            "metrics": {
+                "flesch_score": flesch_score,
+                "passive_voice_pct": pv_pct,
+                "sentence_length_pct": long_sent_pct,
+                "transition_words_pct": trans_pct,
+                "consecutive_runs": consec_runs,
+                "long_paragraphs": len(long_paragraphs),
+            }
+        },
+        "keyword": kw,
+    }
+
 

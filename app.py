@@ -218,7 +218,23 @@ with st.sidebar:
     enable_pagespeed = st.checkbox("Audit Core Web Vitals (Mobile)", value=False)
     pagespeed_key = st.text_input("Google PageSpeed Key (Optional)", type="password", help="Leave blank for public rate-limited quota.")
 
-    # 4. Engine selector
+    # 4. WordPress & Yoast SEO Suite
+    st.markdown("**WordPress & Yoast SEO Suite**")
+    wp_site_url = st.text_input(
+        "WordPress Site URL",
+        value=st.session_state.get("wp_site_url", "https://yoast.com"),
+        placeholder="https://yourblog.com",
+        help="Target WordPress installation running Yoast SEO REST API (v14.0+)."
+    )
+    st.session_state.wp_site_url = wp_site_url
+
+    with st.expander("🔐 WordPress Credentials (Optional / 2-Way Sync)", expanded=False):
+        wp_user = st.text_input("WP Username", value=st.session_state.get("wp_user", ""), placeholder="admin")
+        wp_app_pass = st.text_input("Application Password", value=st.session_state.get("wp_app_pass", ""), type="password", help="Generated under WordPress Users > Profile > Application Passwords.")
+        st.session_state.wp_user = wp_user
+        st.session_state.wp_app_pass = wp_app_pass
+
+    # 5. Engine selector
     st.divider()
     browser_exe = crawler.get_browser_executable()
     default_engine = "Headless Browser (Chrome/Edge)" if browser_exe else "Fast HTTP"
@@ -723,6 +739,7 @@ else:
         "🚨 Actionable Issues",
         "🔍 Grammar, Clarity & Alignment",
         "🎨 In-Text Issue Highlighter",
+        "🚦 Yoast SEO & REST API Studio",
         "🔍 Google SERP (SerpApi)",
         "🧠 DeepSeek AI Copilot",
         "⚡ Core Web Vitals",
@@ -989,9 +1006,263 @@ else:
         st.markdown(f'<div class="blog-viewer-canvas">{highlighted_body}</div>', unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 5: Google SERP Intelligence (SerpApi)
+    # TAB 5: Yoast SEO & REST API Studio
     # -------------------------------------------------------------------------
     with tabs[4]:
+        st.subheader("🚦 Yoast SEO Traffic Lights & REST API Studio")
+        st.caption("Official 14 Focus Keyphrase Criteria, 7 Readability Criteria, and direct integration with WordPress Yoast REST API endpoints.")
+
+        y_eval = c_audit.get("yoast") or audit_engine.evaluate_yoast_seo(c_data, keyword=c_audit.get("keyword"))
+        y_seo = y_eval["seo"]
+        y_read = y_eval["readability"]
+
+        # Dual Traffic Light Banners
+        ycol1, ycol2 = st.columns(2)
+        with ycol1:
+            with st.container(border=True):
+                st.markdown(f"### SEO Traffic Light: **{y_seo['badge']}**")
+                st.markdown(f"**Score:** `{y_seo['score']}/100` | **Passed:** `{y_seo['passed_count']}/{y_seo['total']}` | **OK:** `{y_seo['ok_count']}` | **Needs Fix:** `{y_seo['bad_count']}`")
+                st.caption(f"Focus Keyphrase evaluated: `{y_eval['keyword'] or 'None (Auto-detected)'}`")
+
+        with ycol2:
+            with st.container(border=True):
+                st.markdown(f"### Readability Traffic Light: **{y_read['badge']}**")
+                st.markdown(f"**Score:** `{y_read['score']}/100` | **Passed:** `{y_read['passed_count']}/{y_read['total']}` | **OK:** `{y_read['ok_count']}` | **Needs Fix:** `{y_read['bad_count']}`")
+                st.caption(f"Flesch: `{y_read['metrics']['flesch_score']:.1f}` | Passive: `{y_read['metrics']['passive_voice_pct']:.1f}%` | Transitions: `{y_read['metrics']['transition_words_pct']:.1f}%`")
+
+        st.divider()
+
+        # Inner Sub-Tabs
+        y_subtabs = st.tabs([
+            f"🎯 14 SEO Criteria ({y_seo['passed_count']}/{y_seo['total']} Passed)",
+            f"📖 7 Readability Criteria ({y_read['passed_count']}/{y_read['total']} Passed)",
+            "🔌 Live Yoast REST API Explorer (All Endpoints)",
+            "📤 Sync to WordPress via Yoast API"
+        ])
+
+        # SUBTAB 1: 14 SEO Criteria
+        with y_subtabs[0]:
+            st.markdown("#### 🚦 Yoast Focus Keyphrase Assessment Matrix")
+            s_filter = st.radio(
+                "Filter Criteria:",
+                ["All", "🟢 Good", "🟠 OK", "🔴 Needs Improvement"],
+                horizontal=True,
+                key=f"yoast_seo_filter_{selected_idx}"
+            )
+            filter_map = {"🟢 Good": "good", "🟠 OK": "ok", "🔴 Needs Improvement": "bad"}
+
+            for item in y_seo["items"]:
+                if s_filter != "All" and item["status"] != filter_map[s_filter]:
+                    continue
+                icon = "🟢" if item["status"] == "good" else ("🟠" if item["status"] == "ok" else "🔴")
+                exp_title = f"{icon} {item['title']}"
+                with st.expander(exp_title, expanded=(item["status"] == "bad")):
+                    st.markdown(f"**Diagnostic Feedback:** {item['feedback']}")
+                    st.markdown(f"💡 **Yoast Recommendation:** `{item['recommendation']}`")
+
+        # SUBTAB 2: 7 Readability Criteria
+        with y_subtabs[1]:
+            st.markdown("#### 📖 Yoast Readability & Content Flow Matrix")
+            r_filter = st.radio(
+                "Filter Readability:",
+                ["All", "🟢 Good", "🟠 OK", "🔴 Needs Improvement"],
+                horizontal=True,
+                key=f"yoast_read_filter_{selected_idx}"
+            )
+            for item in y_read["items"]:
+                if r_filter != "All" and item["status"] != filter_map.get(r_filter, ""):
+                    continue
+                icon = "🟢" if item["status"] == "good" else ("🟠" if item["status"] == "ok" else "🔴")
+                exp_title = f"{icon} {item['title']}"
+                with st.expander(exp_title, expanded=(item["status"] == "bad")):
+                    st.markdown(f"**Diagnostic Feedback:** {item['feedback']}")
+                    st.markdown(f"💡 **Yoast Recommendation:** `{item['recommendation']}`")
+
+        # SUBTAB 3: Live Yoast REST API Explorer
+        with y_subtabs[2]:
+            st.markdown("#### 🔌 Yoast SEO REST API Client & Endpoint Inspector")
+            st.caption("Directly query and test live Yoast SEO endpoints on WordPress sites.")
+
+            api_ep = st.selectbox(
+                "Select Yoast API Endpoint:",
+                [
+                    "1. GET /wp-json/yoast/v1/get_head?url={url} (Retrieve Full Yoast SEO Metadata)",
+                    "2. GET /wp-json/wp/v2/posts (WordPress REST API with embedded yoast_head_json)",
+                    "3. GET /wp-json/yoast/v1/statistics (Site Indexing Statistics)",
+                    "4. GET /wp-json/yoast/v1/settings (Plugin Configuration)",
+                ],
+                key=f"yoast_api_ep_select_{selected_idx}"
+            )
+
+            # Endpoint 1: get_head
+            if api_ep.startswith("1."):
+                st.markdown("**Endpoint:** `GET /wp-json/yoast/v1/get_head?url={target_url}`")
+                st.caption("Fetches complete Yoast rendered `<head>` HTML and structured JSON metadata for any post on a WordPress site with Yoast SEO.")
+
+                ghead_col1, ghead_col2 = st.columns([3, 1])
+                with ghead_col1:
+                    query_url = st.text_input(
+                        "Target Blog Post URL to Query:",
+                        value=c_data.get("url") if c_data.get("url", "").startswith("http") else "https://yoast.com/wordpress-seo/",
+                        key=f"yoast_q_url_{selected_idx}"
+                    )
+                with ghead_col2:
+                    test_demo_btn = st.button("✨ Demo: yoast.com", key=f"btn_demo_yoast_{selected_idx}", use_container_width=True)
+
+                if test_demo_btn:
+                    query_url = "https://yoast.com/wordpress-seo/"
+
+                run_get_head = st.button("🚀 Query Yoast get_head Endpoint", type="primary", key=f"btn_run_ghead_{selected_idx}")
+
+                if run_get_head or test_demo_btn:
+                    with st.spinner("Connecting to WordPress Yoast REST API..."):
+                        y_head_res = api_integrations.fetch_yoast_head(query_url)
+                        st.session_state[f"cached_yoast_head_{selected_idx}"] = y_head_res
+
+                if f"cached_yoast_head_{selected_idx}" in st.session_state:
+                    res = st.session_state[f"cached_yoast_head_{selected_idx}"]
+                    if res.get("success"):
+                        st.success(f"✅ Received HTTP 200 from Yoast REST API endpoint: `{res['endpoint']}`")
+
+                        # Summary Metrics
+                        ym_c1, ym_c2, ym_c3, ym_c4 = st.columns(4)
+                        with ym_c1:
+                            st.metric("Yoast Title Length", f"{len(res['title'])} chars")
+                        with ym_c2:
+                            st.metric("Meta Desc Length", f"{len(res['description'])} chars")
+                        with ym_c3:
+                            st.metric("Robots Index", res.get("robots", {}).get("index", "default"))
+                        with ym_c4:
+                            st.metric("Schema Nodes", len(res.get("schema_graph", [])))
+
+                        head_tabs = st.tabs(["📑 Structured Yoast JSON", "📱 OpenGraph & Twitter Cards", "🕸️ Schema @graph", "💻 Raw <head> HTML"])
+                        with head_tabs[0]:
+                            st.json(res["json"])
+                        with head_tabs[1]:
+                            og = res.get("og", {})
+                            tw = res.get("twitter", {})
+                            st.markdown("##### OpenGraph Card")
+                            st.write(f"- **OG Title:** {og.get('title')}")
+                            st.write(f"- **OG Description:** {og.get('description')}")
+                            st.write(f"- **OG Type:** {og.get('type')}")
+                            st.markdown("##### Twitter Card")
+                            st.write(f"- **Twitter Title:** {tw.get('title')}")
+                            st.write(f"- **Twitter Card:** {tw.get('card')}")
+                        with head_tabs[2]:
+                            if res.get("schema_graph"):
+                                for node in res["schema_graph"]:
+                                    node_type = node.get("@type", "Schema Node")
+                                    with st.expander(f"📍 {node_type} ({node.get('@id', '')})"):
+                                        st.json(node)
+                            else:
+                                st.info("No @graph schema nodes returned.")
+                        with head_tabs[3]:
+                            st.code(res["html"][:3000] + ("..." if len(res["html"]) > 3000 else ""), language="html")
+                    else:
+                        st.error(res.get("error"))
+
+            # Endpoint 2: wp/v2/posts
+            elif api_ep.startswith("2."):
+                st.markdown("**Endpoint:** `GET /wp-json/wp/v2/posts`")
+                st.caption("Fetches posts with embedded `yoast_head` and `yoast_head_json` fields.")
+
+                wp_s_col1, wp_s_col2 = st.columns([3, 1])
+                with wp_s_col1:
+                    wp_site = st.text_input("WordPress Base URL:", value=st.session_state.get("wp_site_url", "https://yoast.com"), key=f"wp_p_site_{selected_idx}")
+                with wp_s_col2:
+                    wp_search_term = st.text_input("Search Keyword / Slug (Optional):", placeholder="e.g. seo", key=f"wp_s_term_{selected_idx}")
+
+                if st.button("🚀 Fetch WP Posts via Yoast API", type="primary", key=f"btn_fetch_wp_p_{selected_idx}"):
+                    with st.spinner("Fetching WordPress posts with Yoast data..."):
+                        wp_posts_res = api_integrations.fetch_wp_yoast_posts(wp_site, search=wp_search_term, per_page=5)
+                        if wp_posts_res.get("success"):
+                            st.success(f"✅ Retrieved {wp_posts_res['count']} post(s) from `{wp_posts_res['endpoint']}`")
+                            for p in wp_posts_res["posts"]:
+                                with st.expander(f"📄 #{p['id']}: {p['title']} ({'🟢 Yoast Active' if p['has_yoast'] else '⚪ No Yoast'})"):
+                                    st.write(f"- **Permalink:** [{p['link']}]({p['link']})")
+                                    st.write(f"- **Yoast Title:** {p['yoast_title']}")
+                                    st.write(f"- **Yoast Description:** {p['yoast_description']}")
+                                    if p.get("yoast_head_json"):
+                                        st.json(p["yoast_head_json"])
+                        else:
+                            st.error(wp_posts_res.get("error"))
+
+            # Endpoint 3: statistics
+            elif api_ep.startswith("3."):
+                st.markdown("**Endpoint:** `GET /wp-json/yoast/v1/statistics`")
+                st.caption("Retrieves site-wide indexing statistics. (Requires WordPress admin authorization).")
+                stat_site = st.text_input("WordPress Base URL:", value=st.session_state.get("wp_site_url", "https://yoast.com"), key=f"stat_site_{selected_idx}")
+                stat_user = st.text_input("WP Username:", value=st.session_state.get("wp_user", ""), key=f"stat_u_{selected_idx}")
+                stat_pass = st.text_input("WP Application Password:", value=st.session_state.get("wp_app_pass", ""), type="password", key=f"stat_p_{selected_idx}")
+
+                if st.button("🚀 Query Yoast Statistics", key=f"btn_stat_{selected_idx}"):
+                    with st.spinner("Querying Yoast statistics..."):
+                        s_res = api_integrations.fetch_yoast_statistics(stat_site, username=stat_user, app_password=stat_pass)
+                        if s_res.get("success"):
+                            st.success("✅ Statistics received:")
+                            st.json(s_res["statistics"])
+                        else:
+                            st.warning(s_res.get("error"))
+
+            # Endpoint 4: settings
+            elif api_ep.startswith("4."):
+                st.markdown("**Endpoint:** `GET /wp-json/yoast/v1/settings`")
+                st.caption("Retrieves site-wide Yoast SEO configuration settings.")
+                set_site = st.text_input("WordPress Base URL:", value=st.session_state.get("wp_site_url", "https://yoast.com"), key=f"set_site_{selected_idx}")
+                set_user = st.text_input("WP Username:", value=st.session_state.get("wp_user", ""), key=f"set_u_{selected_idx}")
+                set_pass = st.text_input("WP Application Password:", value=st.session_state.get("wp_app_pass", ""), type="password", key=f"set_p_{selected_idx}")
+
+                if st.button("🚀 Query Yoast Settings", key=f"btn_set_{selected_idx}"):
+                    with st.spinner("Querying Yoast settings..."):
+                        set_res = api_integrations.fetch_yoast_settings(set_site, username=set_user, app_password=set_pass)
+                        if set_res.get("success"):
+                            st.success("✅ Settings received:")
+                            st.json(set_res["settings"])
+                        else:
+                            st.warning(set_res.get("error"))
+
+        # SUBTAB 4: Sync to WordPress
+        with y_subtabs[3]:
+            st.markdown("#### 📤 One-Click 2-Way Sync: Export Recommendations into Yoast SEO")
+            st.caption("Publish your optimized Focus Keyphrase, Title tag, and Meta Description straight back into WordPress via WP REST API + Yoast metadata!")
+
+            sync_col1, sync_col2 = st.columns(2)
+            with sync_col1:
+                sync_site = st.text_input("WordPress Site URL:", value=st.session_state.get("wp_site_url", "https://yourblog.com"), key=f"sync_site_{selected_idx}")
+                sync_pid = st.text_input("WordPress Post ID:", placeholder="e.g. 1042", key=f"sync_pid_{selected_idx}")
+                sync_user = st.text_input("WP Admin/Author Username:", value=st.session_state.get("wp_user", ""), key=f"sync_u_{selected_idx}")
+                sync_pass = st.text_input("WP Application Password:", value=st.session_state.get("wp_app_pass", ""), type="password", key=f"sync_p_{selected_idx}")
+
+            with sync_col2:
+                st.markdown("**Payload Preview to Sync:**")
+                sync_fkw = st.text_input("Yoast Focus Keyphrase (`_yoast_wpseo_focuskw`):", value=c_audit.get("keyword", ""), key=f"sync_kw_{selected_idx}")
+                sync_title = st.text_input("Yoast SEO Title (`_yoast_wpseo_title`):", value=c_data.get("title", ""), key=f"sync_t_{selected_idx}")
+                sync_desc = st.text_area("Yoast Meta Description (`_yoast_wpseo_metadesc`):", value=c_data.get("meta_description", ""), height=85, key=f"sync_d_{selected_idx}")
+
+            if st.button("🚀 Push to WordPress Yoast SEO", type="primary", key=f"btn_push_wp_{selected_idx}", use_container_width=True):
+                if not sync_site or not sync_pid or not sync_user or not sync_pass:
+                    st.error("Please provide WordPress Site URL, Post ID, Username, and Application Password.")
+                else:
+                    with st.spinner("Pushing metadata to WordPress & Yoast..."):
+                        up_res = api_integrations.update_wp_yoast_meta(
+                            sync_site,
+                            post_id=sync_pid,
+                            username=sync_user,
+                            app_password=sync_pass,
+                            focus_kw=sync_fkw,
+                            seo_title=sync_title,
+                            meta_desc=sync_desc
+                        )
+                        if up_res.get("success"):
+                            st.success(f"🎉 {up_res['message']}")
+                            st.write(f"Updated Post URL: [{up_res['link']}]({up_res['link']})")
+                        else:
+                            st.error(up_res.get("error"))
+
+    # -------------------------------------------------------------------------
+    # TAB 6: Google SERP Intelligence (SerpApi)
+    # -------------------------------------------------------------------------
+    with tabs[5]:
         st.subheader("🔍 Google SERP Live Intelligence")
         kw = c_audit["keyword"]
         serp = current.get("serp") or st.session_state.serp_cache.get(kw)
@@ -1036,9 +1307,9 @@ else:
                 st.info("Click 'Fetch Live Google SERP' above to run live competitive intelligence.")
 
     # -------------------------------------------------------------------------
-    # TAB 6: DeepSeek AI Copilot
+    # TAB 7: DeepSeek AI Copilot
     # -------------------------------------------------------------------------
-    with tabs[5]:
+    with tabs[6]:
         st.subheader("🧠 DeepSeek AI Editorial Director")
         ds_key = st.session_state.deepseek_key
 
@@ -1135,9 +1406,9 @@ else:
                 st.markdown(res["content"])
 
     # -------------------------------------------------------------------------
-    # TAB 7: Core Web Vitals & PageSpeed
+    # TAB 8: Core Web Vitals & PageSpeed
     # -------------------------------------------------------------------------
-    with tabs[6]:
+    with tabs[7]:
         st.subheader("⚡ Google Core Web Vitals & Mobile Performance")
         ps = current.get("pagespeed") or st.session_state.pagespeed_cache.get(c_data["url"])
 
@@ -1171,9 +1442,9 @@ else:
             st.info("Core Web Vitals check evaluates real-world mobile UX metrics (LCP, CLS, FCP) directly via Google's Lighthouse engine.")
 
     # -------------------------------------------------------------------------
-    # TAB 8: SERP & Social Preview
+    # TAB 9: SERP & Social Preview
     # -------------------------------------------------------------------------
-    with tabs[7]:
+    with tabs[8]:
         st.subheader("📱 Live SERP & Social Sharing Simulators")
         serp_title = c_data["title"][:60]
         serp_url = c_data["url"]
@@ -1202,9 +1473,9 @@ else:
         """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 9: Content Hierarchy
+    # TAB 10: Content Hierarchy
     # -------------------------------------------------------------------------
-    with tabs[8]:
+    with tabs[9]:
         st.subheader("📑 Document Heading Hierarchy")
         st.write(f"Total Headings: **{len(c_data['headings'])}** (H1: {c_audit['h1_count']}, H2: {c_audit['h2_count']}, H3: {c_audit['h3_count']})")
 
@@ -1224,9 +1495,9 @@ else:
                 st.write(f"- ({ls['word_count']} words): *\"{ls['sentence']}\"*")
 
     # -------------------------------------------------------------------------
-    # TAB 10: Media & Links
+    # TAB 11: Media & Links
     # -------------------------------------------------------------------------
-    with tabs[9]:
+    with tabs[10]:
         st.subheader("🖼️ Image Alt Text & Format Audit")
         if c_data["images"]:
             img_df = pd.DataFrame(c_data["images"])[["src", "alt", "has_alt", "format", "loading"]]
@@ -1250,9 +1521,9 @@ else:
                 st.write(f"- [{cit['text'] or cit['href']}]({cit['href']})")
 
     # -------------------------------------------------------------------------
-    # TAB 11: Checklist & Export
+    # TAB 12: Checklist & Export
     # -------------------------------------------------------------------------
-    with tabs[10]:
+    with tabs[11]:
         st.subheader("📝 Pre-Publish Editorial Sign-off")
         chk_items = [
             "Primary keyword present in Title, H1 and First 100 Words",

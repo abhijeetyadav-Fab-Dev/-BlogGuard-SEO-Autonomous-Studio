@@ -204,5 +204,62 @@ class TestBlogGuard(unittest.TestCase):
         self.assertIn("hl-kw", hl_html)
         self.assertIn("hl-redundant", hl_html)
 
+    def test_yoast_seo_evaluation_criteria(self):
+        sample_page = {
+            "title": "Complete SEO Strategy for High Rankings",
+            "meta_description": "Learn the complete SEO strategy to dominate search engine results with our comprehensive 2026 guide.",
+            "url": "https://example.com/blog/complete-seo-strategy",
+            "clean_text": (
+                "In order to rank, a complete seo strategy is essential for every business. "
+                "Furthermore, understanding search engines helps you optimize effectively. "
+                "However, algorithm updates require continuous monitoring. "
+                "Therefore, keyword research and technical audits remain foundational. "
+                "As a result, sites following these principles outperform their competition."
+            ),
+            "words": ["seo", "strategy", "complete"] * 120, # 360 words
+            "h1_list": ["Complete SEO Strategy for High Rankings"],
+            "h2_list": ["1. Complete SEO Strategy Foundations", "2. Technical Architecture", "3. Analytics"],
+            "h3_list": [],
+            "images": [{"src": "img.jpg", "alt": "complete seo strategy blueprint", "has_alt": True}],
+            "internal_links_count": 2,
+            "external_links_count": 1,
+            "readability": {"flesch_reading_ease": 68.0},
+        }
+
+        yoast = audit_engine.evaluate_yoast_seo(sample_page, keyword="complete seo strategy")
+        self.assertIn("seo", yoast)
+        self.assertIn("readability", yoast)
+
+        # Verify 14 SEO criteria
+        self.assertEqual(yoast["seo"]["total"], 14)
+        self.assertIn("score", yoast["seo"])
+        self.assertIn("badge", yoast["seo"])
+
+        # Verify 7 Readability criteria
+        self.assertEqual(yoast["readability"]["total"], 7)
+        self.assertIn("transition_words_pct", yoast["readability"]["metrics"])
+        self.assertGreater(yoast["readability"]["metrics"]["transition_words_pct"], 0)
+
+    def test_yoast_detect_seo(self):
+        html_with_yoast = "<html><head><!-- This site is optimized with the Yoast SEO plugin v22.0 --><meta name='generator' content='Yoast SEO 22.0' /></head></html>"
+        det = api_integrations.detect_yoast_seo("https://example.com", html_content=html_with_yoast)
+        self.assertTrue(det["is_yoast"])
+        self.assertGreater(len(det["evidence"]), 0)
+
+        html_without_yoast = "<html><head><title>No Plugin</title></head></html>"
+        det2 = api_integrations.detect_yoast_seo("", html_content=html_without_yoast)
+        self.assertFalse(det2["is_yoast"])
+
+    def test_yoast_api_endpoint_structure(self):
+        # Test input validation of Yoast API functions
+        empty_res = api_integrations.fetch_yoast_head("")
+        self.assertFalse(empty_res["success"])
+
+        posts_err = api_integrations.fetch_wp_yoast_posts("")
+        self.assertFalse(posts_err["success"])
+
+        sync_err = api_integrations.update_wp_yoast_meta("", "", "", "")
+        self.assertFalse(sync_err["success"])
+
 if __name__ == "__main__":
     unittest.main()
