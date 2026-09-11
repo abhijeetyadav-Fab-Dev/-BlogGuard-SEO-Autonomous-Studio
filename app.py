@@ -717,12 +717,15 @@ else:
         if not red_list:
             st.success("🎉 Clean copy! No common redundant or wordy filler phrases detected.")
         else:
-            red_df = pd.DataFrame(red_list).rename(columns={
-                "phrase": "Redundant Phrase",
-                "count": "Occurrences",
-                "replacement": "Concise Alternative"
-            })
-            st.dataframe(red_df[["Redundant Phrase", "Occurrences", "Concise Alternative"]], use_container_width=True, hide_index=True)
+            table_rows = [
+                {
+                    "Redundant Phrase": r.get("phrase") or r.get("Redundant Phrase", ""),
+                    "Occurrences": r.get("count") or r.get("Occurrences", 1),
+                    "Concise Alternative": r.get("replacement") or r.get("Simpler Alternative", "")
+                }
+                for r in red_list
+            ]
+            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
             st.caption("💡 Switch to the **'🎨 In-Text Issue Highlighter'** tab to see these phrases highlighted in orange with their one-click replacements.")
 
         st.divider()

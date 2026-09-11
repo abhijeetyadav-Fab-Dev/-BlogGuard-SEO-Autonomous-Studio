@@ -112,9 +112,6 @@ def detect_redundancies(clean_text):
         count = len(re.findall(rf'\b{re.escape(red)}\b', clean_text, re.IGNORECASE))
         if count > 0:
             found.append({
-                "Redundant Phrase": red,
-                "Simpler Alternative": sim,
-                "Occurrences": count,
                 "phrase": red,
                 "replacement": sim,
                 "count": count
@@ -460,7 +457,7 @@ def audit_page(data, keyword=None, writer=None):
 
     # Redundancies / Wordiness warning
     if len(redundancies_info) > 0:
-        red_examples = ", ".join([f"'{r['Redundant Phrase']}' -> '{r['Simpler Alternative']}'" for r in redundancies_info[:3]])
+        red_examples = ", ".join([f"'{r.get('phrase', r.get('Redundant Phrase'))}' -> '{r.get('replacement', r.get('Simpler Alternative'))}'" for r in redundancies_info[:3]])
         issues.append({
             "severity": "info",
             "pillar": "Readability",
