@@ -1,4 +1,5 @@
 import re
+import html
 
 COMMON_SPELLING_FIXES = {
     "alot": "a lot",
@@ -651,3 +652,90 @@ def audit_page(data, keyword=None, writer=None):
         "citations_count": len(citation_links),
         "long_sentences_count": len(long_sentences),
     }
+
+
+def generate_highlighted_html(raw_text, keyword="", jargon_map=None, typo_map=None, hl_kw=True, hl_jg=True, hl_tp=True, hl_ls=True):
+    jargon_map = jargon_map or COMMON_JARGON_REPLACEMENTS
+    typo_map = typo_map or COMMON_SPELLING_FIXES
+
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", raw_text) if p.strip()]
+    if not paragraphs:
+        paragraphs = [raw_text.strip()] if raw_text.strip() else []
+
+    out_paragraphs = []
+
+    for p in paragraphs:
+        # Check if heading
+        if p.startswith("#"):
+            heading_level = len(p) - len(p.lstrip("#"))
+            heading_text = html.escape(p.lstrip("#").strip())
+            h_tag = f"h{min(max(heading_level, 1), 4)}"
+            out_paragraphs.append(
+                f"<{h_tag} style='color:#0f172a; margin-top:24px; margin-bottom:8px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;'>"
+                f"{heading_text}</{h_tag}>"
+            )
+            continue
+
+        # Split into sentences while preserving trailing delimiter
+        raw_sents = [s.strip() for s in re.split(r"([.!?]+\s*)", p) if s.strip()]
+        reconstructed = []
+        idx = 0
+        while idx < len(raw_sents):
+            s_part = raw_sents[idx]
+            if idx + 1 < len(raw_sents) and re.match(r"^[.!?]+\s*$", raw_sents[idx + 1]):
+                s_part += raw_sents[idx + 1]
+                idx += 2
+            else:
+                idx += 1
+            reconstructed.append(s_part)
+
+        p_html_parts = []
+        for s in reconstructed:
+            words = re.findall(r"\b\w+\b", s)
+            is_long = len(words) > 25
+
+            s_escaped = html.escape(s)
+
+            # 1. Highlight target keyword
+            if hl_kw and keyword and keyword.strip():
+                kw = keyword.strip()
+                s_escaped = re.sub(
+                    rf"\b({re.escape(kw)})\b",
+                    r'<span class="hl-kw" title="Target Focus Keyword">\1</span>',
+                    s_escaped,
+                    flags=re.IGNORECASE
+                )
+
+            # 2. Highlight typos
+            if hl_tp:
+                for typo, fix in typo_map.items():
+                    s_escaped = re.sub(
+                        rf"\b({re.escape(typo)})\b",
+                        rf'<span class="hl-typo" title="Spelling Typo: Change to \'{fix}\'">\1 <small class="fix-tag">[➔ {fix}]</small></span>',
+                        s_escaped,
+                        flags=re.IGNORECASE
+                    )
+
+            # 3. Highlight complex jargon words
+            if hl_jg:
+                for jg, sim in jargon_map.items():
+                    s_escaped = re.sub(
+                        rf"\b({re.escape(jg)})\b",
+                        rf'<span class="hl-jargon" title="Complex Jargon: Consider \'{sim}\'">\1 <small class="sim-tag">[➔ {sim}]</small></span>',
+                        s_escaped,
+                        flags=re.IGNORECASE
+                    )
+
+            # 4. Highlight run-on sentence wrapper
+            if hl_ls and is_long:
+                s_escaped = (
+                    f'<span class="hl-long-sent" title="Run-on sentence ({len(words)} words - consider splitting)">'
+                    f'{s_escaped}'
+                    f'</span>'
+                )
+
+            p_html_parts.append(s_escaped)
+
+        out_paragraphs.append(f"<p style='margin-bottom: 16px; line-height: 1.8; color: #1e293b;'>{' '.join(p_html_parts)}</p>")
+
+    return "\n".join(out_paragraphs)

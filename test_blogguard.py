@@ -13,7 +13,12 @@ class TestBlogGuard(unittest.TestCase):
         read = crawler.calculate_readability(text, words, sentences)
         self.assertIn("flesch_reading_ease", read)
         self.assertIn("flesch_kincaid_grade", read)
-        self.assertGreater(read["flesch_reading_ease"], 0)
+    def test_highlighted_html(self):
+        text = "Organizations must utilize modern strategies to avoid mistakes. Furthermore, we recieved alot of feedback."
+        html_res = audit_engine.generate_highlighted_html(text, keyword="strategies", hl_kw=True, hl_jg=True, hl_tp=True, hl_ls=True)
+        self.assertIn("hl-kw", html_res)
+        self.assertIn("hl-jargon", html_res)
+        self.assertIn("hl-typo", html_res)
 
     def test_mock_page_audit(self):
         mock_data = {

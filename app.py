@@ -46,6 +46,70 @@ st.markdown("""
         padding: 14px;
         margin-bottom: 10px;
     }
+    .blog-viewer-canvas {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 12px;
+        padding: 28px;
+        font-size: 15.5px;
+        line-height: 1.85;
+        color: #1e293b;
+        max-height: 680px;
+        overflow-y: auto;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .hl-kw {
+        background-color: #bbf7d0;
+        color: #14532d;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border: 1px solid #86efac;
+    }
+    .hl-jargon {
+        background-color: #f3e8ff;
+        color: #6b21a8;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border-bottom: 2px solid #a855f7;
+    }
+    .hl-typo {
+        background-color: #fee2e2;
+        color: #991b1b;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 4px;
+        text-decoration: underline wavy #ef4444;
+    }
+    .hl-long-sent {
+        background-color: #fef9c3;
+        border-left: 3.5px solid #ca8a04;
+        padding: 2px 6px;
+        border-radius: 3px;
+        display: inline;
+    }
+    .fix-tag {
+        font-size: 11px;
+        font-weight: 700;
+        color: #b91c1c;
+        background: #ffffff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        border: 1px solid #fca5a5;
+        margin-left: 3px;
+    }
+    .sim-tag {
+        font-size: 11px;
+        font-weight: 700;
+        color: #7e22ce;
+        background: #ffffff;
+        padding: 1px 5px;
+        border-radius: 3px;
+        border: 1px solid #d8b4fe;
+        margin-left: 3px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -461,6 +525,7 @@ else:
     tabs = st.tabs([
         "📊 360° Scorecard",
         "🚨 Actionable Issues",
+        "🎨 In-Text Issue Highlighter",
         "🔍 Google SERP (SerpApi)",
         "🧠 DeepSeek AI Copilot",
         "⚡ Core Web Vitals",
@@ -539,11 +604,68 @@ else:
             st.subheader("📖 Complex Jargon & Vocabulary Simplifier")
             st.caption("Replacing these multi-syllable corporate/academic terms with plain conversational words will immediately boost your Flesch Reading Ease score:")
             st.dataframe(pd.DataFrame(c_audit["detected_jargon"]), use_container_width=True, hide_index=True)
+            st.info("💡 **Tip:** Switch to the **'🎨 In-Text Issue Highlighter'** tab above to see these exact jargon words, run-on sentences, and typos highlighted live inside your article!")
 
     # -------------------------------------------------------------------------
-    # TAB 3: Google SERP Intelligence (SerpApi)
+    # TAB 3: In-Text Issue Highlighter
     # -------------------------------------------------------------------------
     with tabs[2]:
+        st.subheader("🎨 Live In-Text Visual Issue Highlighter")
+        st.caption("Inspect your full article with color-coded in-line highlights for run-on sentences, complex jargon, typos, and keyword density.")
+
+        # Interactive Controls
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
+        with ctrl_col1:
+            hl_ls = st.checkbox("🟡 Run-On Sentences (>25 words)", value=True, key=f"hl_ls_{selected_idx}")
+        with ctrl_col2:
+            hl_jg = st.checkbox("🟣 Jargon & Complex Terms", value=True, key=f"hl_jg_{selected_idx}")
+        with ctrl_col3:
+            hl_tp = st.checkbox("🔴 Spelling & Typos", value=True, key=f"hl_tp_{selected_idx}")
+        with ctrl_col4:
+            hl_kw = st.checkbox("🟢 Focus Keyword", value=True, key=f"hl_kw_{selected_idx}")
+
+        # Metrics Strip
+        long_count = len(c_data.get("long_sentences", []))
+        jargon_count = sum(j["Occurrences"] for j in c_audit.get("detected_jargon", []))
+        typo_count = len(c_audit.get("corrections", []))
+        kw_count = len(re.findall(rf"\b{re.escape(c_audit['keyword'])}\b", c_data["clean_text"], re.IGNORECASE)) if c_audit["keyword"] else 0
+
+        st.markdown(
+            f"""
+            <div style="display: flex; gap: 12px; margin: 12px 0 18px 0; flex-wrap: wrap;">
+                <span style="background: #fef08a; color: #854d0e; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #fde047;">
+                    🟡 {long_count} Run-On Sentence(s)
+                </span>
+                <span style="background: #f3e8ff; color: #6b21a8; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #d8b4fe;">
+                    🟣 {jargon_count} Jargon Occurrence(s)
+                </span>
+                <span style="background: #fee2e2; color: #991b1b; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #fca5a5;">
+                    🔴 {typo_count} Spelling Correction(s)
+                </span>
+                <span style="background: #dcfce7; color: #166534; padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; border: 1px solid #86efac;">
+                    🟢 {kw_count} Keyword Mention(s)
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Render highlighted article canvas
+        highlighted_body = audit_engine.generate_highlighted_html(
+            c_data["clean_text"],
+            keyword=c_audit["keyword"],
+            hl_kw=hl_kw,
+            hl_jg=hl_jg,
+            hl_tp=hl_tp,
+            hl_ls=hl_ls
+        )
+
+        st.markdown(f'<div class="blog-viewer-canvas">{highlighted_body}</div>', unsafe_allow_html=True)
+
+    # -------------------------------------------------------------------------
+    # TAB 4: Google SERP Intelligence (SerpApi)
+    # -------------------------------------------------------------------------
+    with tabs[3]:
         st.subheader("🔍 Google SERP Live Intelligence")
         kw = c_audit["keyword"]
         serp = current.get("serp") or st.session_state.serp_cache.get(kw)
@@ -588,9 +710,9 @@ else:
                 st.info("Click 'Fetch Live Google SERP' above to run live competitive intelligence.")
 
     # -------------------------------------------------------------------------
-    # TAB 4: DeepSeek AI Copilot
+    # TAB 5: DeepSeek AI Copilot
     # -------------------------------------------------------------------------
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("🧠 DeepSeek AI Editorial Director")
         ds_key = st.session_state.deepseek_key
 
@@ -669,9 +791,9 @@ else:
                 st.markdown(res["content"])
 
     # -------------------------------------------------------------------------
-    # TAB 5: Core Web Vitals & PageSpeed
+    # TAB 6: Core Web Vitals & PageSpeed
     # -------------------------------------------------------------------------
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("⚡ Google Core Web Vitals & Mobile Performance")
         ps = current.get("pagespeed") or st.session_state.pagespeed_cache.get(c_data["url"])
 
@@ -705,11 +827,10 @@ else:
             st.info("Core Web Vitals check evaluates real-world mobile UX metrics (LCP, CLS, FCP) directly via Google's Lighthouse engine.")
 
     # -------------------------------------------------------------------------
-    # TAB 6: SERP & Social Preview
+    # TAB 7: SERP & Social Preview
     # -------------------------------------------------------------------------
-    with tabs[5]:
+    with tabs[6]:
         st.subheader("📱 Live SERP & Social Sharing Simulators")
-        st.markdown("#### Google SERP Desktop & Mobile Snippet")
         serp_title = c_data["title"][:60]
         serp_url = c_data["url"]
         serp_desc = c_data["meta_description"][:160] or "No meta description provided. Google will generate a dynamic snippet from page content."
@@ -737,9 +858,9 @@ else:
         """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 7: Content Hierarchy
+    # TAB 8: Content Hierarchy
     # -------------------------------------------------------------------------
-    with tabs[6]:
+    with tabs[7]:
         st.subheader("📑 Document Heading Hierarchy")
         st.write(f"Total Headings: **{len(c_data['headings'])}** (H1: {c_audit['h1_count']}, H2: {c_audit['h2_count']}, H3: {c_audit['h3_count']})")
 
@@ -759,9 +880,9 @@ else:
                 st.write(f"- ({ls['word_count']} words): *\"{ls['sentence']}\"*")
 
     # -------------------------------------------------------------------------
-    # TAB 8: Media & Links
+    # TAB 9: Media & Links
     # -------------------------------------------------------------------------
-    with tabs[7]:
+    with tabs[8]:
         st.subheader("🖼️ Image Alt Text & Format Audit")
         if c_data["images"]:
             img_df = pd.DataFrame(c_data["images"])[["src", "alt", "has_alt", "format", "loading"]]
@@ -785,9 +906,9 @@ else:
                 st.write(f"- [{cit['text'] or cit['href']}]({cit['href']})")
 
     # -------------------------------------------------------------------------
-    # TAB 9: Checklist & Export
+    # TAB 10: Checklist & Export
     # -------------------------------------------------------------------------
-    with tabs[8]:
+    with tabs[9]:
         st.subheader("📝 Pre-Publish Editorial Sign-off")
         chk_items = [
             "Primary keyword present in Title, H1 and First 100 Words",
