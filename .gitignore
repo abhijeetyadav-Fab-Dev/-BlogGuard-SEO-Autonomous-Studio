@@ -8,3 +8,4 @@ ENV/
 .streamlit/
 *.log
 .DS_Store
+graphify-out/
