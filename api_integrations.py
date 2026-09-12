@@ -1,10 +1,15 @@
 import os
 import json
+import re
+from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 SERPAPI_URL = "https://serpapi.com/search"
 PAGESPEED_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 DEEPSEEK_DEFAULT_URL = "https://api.deepseek.com/chat/completions"
+GEMINI_DEFAULT_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+OPENAI_DEFAULT_URL = "https://api.openai.com/v1/chat/completions"
 
 
 # ---------------------------------------------------------------------------
@@ -122,51 +127,132 @@ def fetch_pagespeed_insights(url, api_key=None, strategy="mobile"):
 
 
 # ---------------------------------------------------------------------------
-# 3. DeepSeek AI Strategic Copilot
+# 3. Multi-LLM AI Copilot Hub (DeepSeek, Gemini, OpenAI)
 # ---------------------------------------------------------------------------
-def query_deepseek_copilot(prompt, api_key, model="deepseek-chat", base_url=DEEPSEEK_DEFAULT_URL, system_role=None):
-    if not api_key:
-        return {"error": "DeepSeek API Key is required. Please provide your key in the sidebar."}
-
+def query_ai_copilot(prompt, provider="deepseek", api_key=None, model=None, system_role=None, base_url=None):
+    """
+    Unified Multi-LLM Gateway supporting DeepSeek, Google Gemini, and OpenAI.
+    Provides transparent switching and fallback capability.
+    """
     system_role = system_role or (
         "You are an Elite SEO Strategist and Head of Editorial at a top publication. "
         "Your role is to conduct rigorous, actionable, high-ROI audits and produce publish-ready SEO assets."
     )
+    provider = (provider or "deepseek").lower().strip()
 
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_role},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.5,
-    }
-
-    try:
-        res = requests.post(base_url, headers=headers, json=payload, timeout=60)
-        if res.status_code != 200:
-            return {"error": f"DeepSeek API error {res.status_code}: {res.text[:300]}"}
-
-        data = res.json()
-        content = data["choices"][0]["message"]["content"]
-        reasoning = data["choices"][0]["message"].get("reasoning_content")
-        return {
-            "success": True,
-            "content": content,
-            "reasoning": reasoning,
-            "model": model,
-            "usage": data.get("usage", {}),
+    # --- 1. Google Gemini ---
+    if provider in ("gemini", "google"):
+        api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            return {"error": "Google Gemini API Key is required. Provide it in the sidebar or set GEMINI_API_KEY."}
+        model = model or "gemini-1.5-flash"
+        endpoint = f"{GEMINI_DEFAULT_URL}/{model}:generateContent?key={api_key.strip()}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.5}
         }
-    except Exception as e:
-        return {"error": f"DeepSeek request failed: {str(e)}"}
+        if system_role:
+            payload["systemInstruction"] = {"parts": [{"text": system_role}]}
+        try:
+            res = requests.post(endpoint, json=payload, timeout=60)
+            if res.status_code != 200:
+                return {"error": f"Gemini API error {res.status_code}: {res.text[:300]}"}
+            data = res.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return {"error": f"Gemini returned no candidates: {res.text[:300]}"}
+            content = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            return {
+                "success": True,
+                "provider": "gemini",
+                "model": model,
+                "content": content,
+                "reasoning": None,
+                "usage": data.get("usageMetadata", {}),
+            }
+        except Exception as e:
+            return {"error": f"Gemini request failed: {str(e)}"}
+
+    # --- 2. OpenAI ---
+    elif provider == "openai":
+        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            return {"error": "OpenAI API Key is required. Provide it in the sidebar or set OPENAI_API_KEY."}
+        model = model or "gpt-4o-mini"
+        endpoint = base_url or OPENAI_DEFAULT_URL
+        headers = {
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_role},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.5
+        }
+        try:
+            res = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+            if res.status_code != 200:
+                return {"error": f"OpenAI API error {res.status_code}: {res.text[:300]}"}
+            data = res.json()
+            content = data["choices"][0]["message"]["content"]
+            return {
+                "success": True,
+                "provider": "openai",
+                "model": model,
+                "content": content,
+                "reasoning": None,
+                "usage": data.get("usage", {}),
+            }
+        except Exception as e:
+            return {"error": f"OpenAI request failed: {str(e)}"}
+
+    # --- 3. DeepSeek (Default) ---
+    else:
+        api_key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            return {"error": "DeepSeek API Key is required. Please provide your key in the sidebar or set DEEPSEEK_API_KEY."}
+        model = model or "deepseek-chat"
+        endpoint = base_url or DEEPSEEK_DEFAULT_URL
+        headers = {
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_role},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.5,
+        }
+        try:
+            res = requests.post(endpoint, headers=headers, json=payload, timeout=60)
+            if res.status_code != 200:
+                return {"error": f"DeepSeek API error {res.status_code}: {res.text[:300]}"}
+            data = res.json()
+            content = data["choices"][0]["message"]["content"]
+            reasoning = data["choices"][0]["message"].get("reasoning_content")
+            return {
+                "success": True,
+                "provider": "deepseek",
+                "content": content,
+                "reasoning": reasoning,
+                "model": model,
+                "usage": data.get("usage", {}),
+            }
+        except Exception as e:
+            return {"error": f"DeepSeek request failed: {str(e)}"}
 
 
-def generate_deepseek_audit(article_data, audit_results, api_key, model="deepseek-chat"):
+def query_deepseek_copilot(prompt, api_key, model="deepseek-chat", base_url=DEEPSEEK_DEFAULT_URL, system_role=None):
+    """Backwards-compatible wrapper for DeepSeek."""
+    return query_ai_copilot(prompt, provider="deepseek", api_key=api_key, model=model, system_role=system_role, base_url=base_url)
+
+
+def generate_deepseek_audit(article_data, audit_results, api_key, model="deepseek-chat", provider="deepseek"):
     title = article_data.get("title", "")
     keyword = audit_results.get("keyword", "")
     word_count = audit_results.get("word_count", 0)
@@ -193,10 +279,10 @@ Provide a structured, executive-level report with these 4 sections:
 3. ⚡ CTR & Hook Optimization: Critique the current title and opening hook. Give 3 better, high-CTR headline alternatives.
 4. 🚀 Top 3 High-Impact Action Items: Specific, numbered steps the writer/editor should take immediately to rank #1.
 """
-    return query_deepseek_copilot(prompt, api_key, model=model)
+    return query_ai_copilot(prompt, provider=provider, api_key=api_key, model=model)
 
 
-def generate_ai_faq_schema(article_data, paa_questions, api_key, model="deepseek-chat"):
+def generate_ai_faq_schema(article_data, paa_questions, api_key, model="deepseek-chat", provider="deepseek"):
     title = article_data.get("title", "")
     sample_text = article_data.get("clean_text", "")[:3000]
     questions_str = "\n".join([f"- {p['question']}" for p in paa_questions[:6]]) if paa_questions else "None provided"
@@ -214,10 +300,10 @@ Content Context:
 Generate 4 to 5 relevant Frequently Asked Questions and accurate, concise answers based on the content.
 Return ONLY valid JSON inside a ```json ... ``` code block containing the <script type="application/ld+json"> content.
 """
-    return query_deepseek_copilot(prompt, api_key, model=model)
+    return query_ai_copilot(prompt, provider=provider, api_key=api_key, model=model)
 
 
-def rewrite_for_readability(article_data, api_key, model="deepseek-chat"):
+def rewrite_for_readability(article_data, api_key, model="deepseek-chat", provider="deepseek"):
     title = article_data.get("title", "")
     sample_text = article_data.get("clean_text", "")[:4000]
 
@@ -245,10 +331,10 @@ Provide:
 2. ✍️ Full Conversational Rewrite of the Key Sections (Grade 7-8 reading level)
 3. 📊 Estimated Readability Boost (Before vs. After comparison)
 """
-    return query_deepseek_copilot(prompt, api_key, model=model)
+    return query_ai_copilot(prompt, provider=provider, api_key=api_key, model=model)
 
 
-def verify_content_and_facts(article_data, api_key, model="deepseek-chat"):
+def verify_content_and_facts(article_data, api_key, model="deepseek-chat", provider="deepseek"):
     title = article_data.get("title", "")
     sample_text = article_data.get("clean_text", "")[:4500]
 
@@ -277,7 +363,7 @@ AUDIT REQUIREMENTS:
 5. 📊 Verdict & Readiness Score:
    - Provide an overall Clarity & Alignment Score (0-100) and an editorial sign-off verdict.
 """
-    return query_deepseek_copilot(prompt, api_key, model=model)
+    return query_ai_copilot(prompt, provider=provider, api_key=api_key, model=model)
 
 
 # ---------------------------------------------------------------------------
@@ -589,4 +675,141 @@ def detect_yoast_seo(target_url, html_content=""):
             return {"is_yoast": True, "evidence": ["Yoast REST API get_head Active"]}
 
     return {"is_yoast": False, "evidence": []}
+
+
+def detect_cms_platform(target_url, html_content=""):
+    """
+    Identifies the underlying CMS and SEO plugin powering the blog:
+    - WordPress (Yoast, Rank Math, All in One SEO, or Core)
+    - Ghost CMS
+    - Shopify
+    - Webflow
+    - Custom / Headless
+    """
+    cms = "Custom / Headless"
+    seo_plugin = "Standard / None Detected"
+    evidence = []
+
+    if html_content:
+        # WordPress check
+        if any(marker in html_content for marker in ["wp-content", "wp-includes", "/wp-json/"]):
+            cms = "WordPress"
+            if "rank-math" in html_content or "/wp-json/rankmath/" in html_content:
+                seo_plugin = "Rank Math SEO"
+                evidence.append("Rank Math SEO markers detected")
+            elif "yoast" in html_content.lower() or "yoast-schema-graph" in html_content:
+                seo_plugin = "Yoast SEO"
+                evidence.append("Yoast SEO markers detected")
+            elif "aioseo" in html_content:
+                seo_plugin = "All in One SEO (AIOSEO)"
+                evidence.append("AIOSEO markers detected")
+            else:
+                seo_plugin = "WordPress Native"
+                evidence.append("Core WordPress detected")
+
+        # Ghost CMS check
+        elif "ghost-portal" in html_content or re.search(r'<meta[^>]*generator[^>]*content=[\'"]Ghost', html_content, re.I):
+            cms = "Ghost"
+            seo_plugin = "Ghost Native SEO"
+            evidence.append("Ghost meta generator tag detected")
+
+        # Shopify check
+        elif "cdn.shopify.com" in html_content or "Shopify.theme" in html_content:
+            cms = "Shopify"
+            seo_plugin = "Shopify Liquid SEO"
+            evidence.append("Shopify CDN assets detected")
+
+        # Webflow check
+        elif "d1azc1qln24ryf.cloudfront.net" in html_content or re.search(r'<meta[^>]*content=[\'"]Webflow', html_content, re.I):
+            cms = "Webflow"
+            seo_plugin = "Webflow SEO"
+            evidence.append("Webflow assets/generator detected")
+
+    # Fast probe fallback on target_url if html was blank
+    if cms == "Custom / Headless" and target_url:
+        try:
+            p_wp = requests.get(f"{_normalize_site_url(target_url)}/wp-json/", timeout=4)
+            if p_wp.status_code == 200 and "namespaces" in p_wp.text:
+                cms = "WordPress"
+                evidence.append("Active WP-JSON REST API")
+        except Exception:
+            pass
+
+    return {
+        "platform": cms,
+        "cms": cms,
+        "confidence": 95 if cms != "Custom / Headless" else 40,
+        "seo_plugin": seo_plugin,
+        "seo_plugins": [seo_plugin] if seo_plugin != "Standard / None Detected" else [],
+        "evidence": "; ".join(evidence) if evidence else "No markers identified",
+    }
+
+
+def fetch_competitor_content(competitors, max_comp=3, timeout=8):
+    """
+    Rapidly fetches and extracts content from top ranking competitors.
+    Used for TF-IDF and semantic content gap analysis.
+    """
+    if not competitors:
+        return []
+
+    urls_to_fetch = []
+    for c in competitors[:max_comp]:
+        if isinstance(c, dict):
+            link = c.get("link") or c.get("url")
+            title = c.get("title", "")
+        else:
+            link = str(c)
+            title = link
+        if link and link.startswith("http"):
+            urls_to_fetch.append({"url": link, "title": title})
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 BlogGuard-CompetitorBench/2.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    def _fetch_single_comp(comp_item):
+        target_url = comp_item["url"]
+        try:
+            res = requests.get(target_url, headers=headers, timeout=timeout, allow_redirects=True)
+            if res.status_code == 200 and len(res.text) > 300:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(res.text, "html.parser")
+                for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside"]):
+                    tag.decompose()
+
+                h2s = [h.get_text(strip=True) for h in soup.find_all("h2") if h.get_text(strip=True)]
+                h3s = [h.get_text(strip=True) for h in soup.find_all("h3") if h.get_text(strip=True)]
+
+                body = soup.find("article") or soup.find("body") or soup
+                clean_text = re.sub(r"\s+", " ", body.get_text(separator=" ", strip=True))
+                words = [w.lower() for w in re.findall(r"\b[a-zA-Z]{3,}\b", clean_text)]
+                images_count = len(soup.find_all("img"))
+                citations_count = len([a for a in soup.find_all("a", href=True) if not a["href"].startswith(("#", "/"))])
+
+                return {
+                    "url": target_url,
+                    "title": comp_item["title"] or (soup.title.string if soup.title else target_url),
+                    "h2_list": h2s[:12],
+                    "h3_list": h3s[:12],
+                    "word_count": len(words),
+                    "words": words,
+                    "images_count": images_count,
+                    "citations_count": citations_count,
+                    "clean_sample": clean_text[:2500],
+                }
+        except Exception:
+            pass
+        return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(_fetch_single_comp, c) for c in urls_to_fetch]
+        for future in as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
+
+    return results
 

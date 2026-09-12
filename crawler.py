@@ -4,9 +4,9 @@ import time
 import json
 import subprocess
 from urllib.parse import urlparse, urljoin
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from bs4 import BeautifulSoup
-
 import shutil
 
 CHROME_PATHS = [
@@ -501,3 +501,218 @@ def parse_page_data(fetch_result):
         "top_bigrams": kw_data["top_bigrams"],
         "suggested_keyword": kw_data["primary_guess"],
     }
+
+
+def discover_and_parse_sitemap(domain_or_url, max_urls=50, timeout=12):
+    """
+    Discovers and parses XML sitemaps for any domain or specific sitemap URL.
+    Supports standard <urlset> and recursive <sitemapindex> structures.
+    """
+    input_clean = domain_or_url.strip()
+    if not input_clean.startswith(("http://", "https://")):
+        input_clean = "https://" + input_clean
+
+    parsed = urlparse(input_clean)
+    base_origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    candidate_sitemaps = []
+    if parsed.path.endswith(".xml"):
+        candidate_sitemaps.append(input_clean)
+    else:
+        candidate_sitemaps.extend([
+            f"{base_origin}/sitemap.xml",
+            f"{base_origin}/sitemap_index.xml",
+            f"{base_origin}/wp-sitemap.xml",
+            f"{base_origin}/post-sitemap.xml",
+        ])
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 BlogGuard-Sitemap-Discovery/2.0",
+        "Accept": "application/xml, text/xml, */*",
+    }
+
+    discovered_urls = []
+    active_sitemap_url = ""
+
+    for s_url in candidate_sitemaps:
+        try:
+            res = requests.get(s_url, headers=headers, timeout=timeout, allow_redirects=True)
+            if res.status_code == 200 and ("xml" in res.headers.get("content-type", "").lower() or "<urlset" in res.text or "<sitemapindex" in res.text):
+                active_sitemap_url = s_url
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                # Check if it is a sitemap index containing child sitemaps
+                child_sitemaps = [s.get_text(strip=True) for s in soup.find_all("loc") if s.find_parent("sitemap")]
+                if child_sitemaps:
+                    # Prioritize sub-sitemaps likely containing blog posts or articles
+                    post_sitemaps = [c for c in child_sitemaps if any(k in c.lower() for k in ["post", "blog", "article"])]
+                    selected_children = post_sitemaps if post_sitemaps else child_sitemaps[:3]
+
+                    for child_url in selected_children:
+                        try:
+                            c_res = requests.get(child_url, headers=headers, timeout=timeout)
+                            if c_res.status_code == 200:
+                                c_soup = BeautifulSoup(c_res.text, "html.parser")
+                                for u in c_soup.find_all("url"):
+                                    loc = u.find("loc")
+                                    if loc and loc.get_text(strip=True):
+                                        lastmod = u.find("lastmod")
+                                        priority = u.find("priority")
+                                        discovered_urls.append({
+                                            "url": loc.get_text(strip=True),
+                                            "lastmod": lastmod.get_text(strip=True) if lastmod else "N/A",
+                                            "priority": priority.get_text(strip=True) if priority else "0.5",
+                                            "parent_sitemap": child_url,
+                                        })
+                                        if len(discovered_urls) >= max_urls:
+                                            break
+                        except Exception:
+                            continue
+                        if len(discovered_urls) >= max_urls:
+                            break
+                else:
+                    # Direct urlset
+                    for u in soup.find_all("url"):
+                        loc = u.find("loc")
+                        if loc and loc.get_text(strip=True):
+                            lastmod = u.find("lastmod")
+                            priority = u.find("priority")
+                            discovered_urls.append({
+                                "url": loc.get_text(strip=True),
+                                "lastmod": lastmod.get_text(strip=True) if lastmod else "N/A",
+                                "priority": priority.get_text(strip=True) if priority else "0.5",
+                                "parent_sitemap": s_url,
+                            })
+                            if len(discovered_urls) >= max_urls:
+                                break
+
+                if discovered_urls:
+                    break
+        except Exception:
+            continue
+
+    if not discovered_urls:
+        return {
+            "success": False,
+            "error": f"No accessible XML sitemaps found at {base_origin}. Checked: {', '.join(candidate_sitemaps)}",
+            "sitemap_url": active_sitemap_url or candidate_sitemaps[0],
+            "total_found": 0,
+            "urls": [],
+        }
+
+    return {
+        "success": True,
+        "sitemap_url": active_sitemap_url,
+        "total_found": len(discovered_urls),
+        "urls": discovered_urls[:max_urls],
+    }
+
+
+def audit_links_health(links, base_url="", max_check=25, timeout=6):
+    """
+    Concurrently audits the health of extracted page links.
+    Detects 404 dead links, server errors, redirect chains, and insecure HTTP mixed content.
+    """
+    to_check = links[:max_check]
+    if not to_check:
+        return {
+            "total_checked": 0,
+            "broken_count": 0,
+            "redirect_count": 0,
+            "mixed_content_count": 0,
+            "broken_links": [],
+            "redirect_links": [],
+            "mixed_content": [],
+            "all_results": [],
+        }
+
+    base_is_https = base_url.lower().startswith("https://") if base_url else False
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 BlogGuard-LinkSentinel/2.0",
+        "Accept": "*/*",
+    }
+
+    def _probe_single_link(link_item):
+        target_href = link_item.get("href", "")
+        text = link_item.get("text", "") or "[No Anchor Text]"
+        is_internal = link_item.get("is_internal", False)
+
+        is_mixed = base_is_https and target_href.lower().startswith("http://")
+
+        status_code = 0
+        final_url = target_href
+        is_redirect = False
+        status_label = "Unknown"
+        is_broken = False
+
+        try:
+            # Try HEAD first for performance
+            res = requests.head(target_href, headers=headers, timeout=timeout, allow_redirects=True)
+            if res.status_code == 405:  # Method Not Allowed -> fallback to GET
+                res = requests.get(target_href, headers=headers, timeout=timeout, allow_redirects=True, stream=True)
+            status_code = res.status_code
+            final_url = str(res.url)
+            is_redirect = (final_url.rstrip("/") != target_href.rstrip("/"))
+
+            if 200 <= status_code < 400:
+                status_label = "200 OK" if not is_redirect else f"{status_code} Redirect"
+            elif status_code in (404, 410):
+                status_label = f"🔴 {status_code} Dead Link"
+                is_broken = True
+            elif status_code >= 500:
+                status_label = f"🔴 {status_code} Server Error"
+                is_broken = True
+            else:
+                status_label = f"⚠️ HTTP {status_code}"
+                if status_code in (401, 403):
+                    # Some sites block scrapers with 403; flag but note bot restriction
+                    status_label = f"🔒 HTTP {status_code} (Restricted/Auth)"
+        except requests.exceptions.SSLError:
+            status_code = 495
+            status_label = "🔴 SSL Certificate Error"
+            is_broken = True
+        except requests.exceptions.Timeout:
+            status_code = 408
+            status_label = "🔴 Request Timeout"
+            is_broken = True
+        except Exception as e:
+            status_code = 0
+            status_label = f"🔴 Connection Failed ({type(e).__name__})"
+            is_broken = True
+
+        return {
+            "href": target_href,
+            "anchor_text": text[:60],
+            "is_internal": is_internal,
+            "status_code": status_code,
+            "status_label": status_label,
+            "final_url": final_url,
+            "is_redirect": is_redirect,
+            "is_broken": is_broken,
+            "is_mixed_content": is_mixed,
+        }
+
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_link = {executor.submit(_probe_single_link, link): link for link in to_check}
+        for future in as_completed(future_to_link):
+            try:
+                results.append(future.result())
+            except Exception:
+                pass
+
+    broken = [r for r in results if r["is_broken"]]
+    redirects = [r for r in results if r["is_redirect"]]
+    mixed = [r for r in results if r["is_mixed_content"]]
+
+    return {
+        "total_checked": len(results),
+        "broken_count": len(broken),
+        "redirect_count": len(redirects),
+        "mixed_content_count": len(mixed_content) if (mixed_content := mixed) else 0,
+        "broken_links": broken,
+        "redirect_links": redirects,
+        "mixed_content": mixed,
+        "all_results": results,
+    }
+

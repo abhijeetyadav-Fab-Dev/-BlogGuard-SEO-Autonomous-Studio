@@ -9,3 +9,4 @@ ENV/
 *.log
 .DS_Store
 graphify-out/
+*.db

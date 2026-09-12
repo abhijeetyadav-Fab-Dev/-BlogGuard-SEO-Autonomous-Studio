@@ -4,6 +4,7 @@ import html
 COMMON_SPELLING_FIXES = {
     "alot": "a lot",
     "recieve": "receive",
+    "acheive": "achieve",
     "seperate": "separate",
     "definately": "definitely",
     "occured": "occurred",
@@ -826,6 +827,7 @@ def audit_page(data, keyword=None, writer=None):
         "citations_count": len(citation_links),
         "long_sentences_count": len(long_sentences),
         "yoast": evaluate_yoast_seo(data, keyword=keyword),
+        "aeo": evaluate_aeo_readiness(data, keyword=keyword),
     }
 
 
@@ -1616,5 +1618,476 @@ def evaluate_yoast_seo(page_data, keyword=None):
         },
         "keyword": kw,
     }
+
+
+# ---------------------------------------------------------------------------
+# 6. SAFE IN-TEXT EDITORIAL AUTO-PATCHER
+# ---------------------------------------------------------------------------
+def apply_safe_simplifications(clean_text):
+    """
+    Safely applies non-destructive editorial simplifications to blog drafts:
+    1. Corrects confirmed spelling mistakes.
+    2. Substitutes wordy redundancies with concise alternatives.
+    3. Replaces corporate jargon with plain conversational English.
+    Returns the patched text and an audit trail of every change applied.
+    """
+    if not clean_text:
+        return {
+            "original_text": "",
+            "patched_text": "",
+            "total_replacements": 0,
+            "replacements": [],
+            "spelling_fixes": [],
+            "redundancy_fixes": [],
+            "jargon_fixes": [],
+            "words_saved": 0,
+        }
+
+    patched = clean_text
+    replacements = []
+
+    # 1. Spelling Fixes
+    for typo, correct in COMMON_SPELLING_FIXES.items():
+        pattern = re.compile(rf"\b{re.escape(typo)}\b", re.IGNORECASE)
+        matches = pattern.findall(patched)
+        if matches:
+            patched = pattern.sub(correct, patched)
+            replacements.append({
+                "type": "spelling",
+                "category": "Spelling Correction",
+                "original": typo,
+                "replacement": correct,
+                "occurrences": len(matches),
+            })
+
+    # 2. Redundancy Fixes
+    for red, concise in COMMON_REDUNDANCIES.items():
+        pattern = re.compile(rf"\b{re.escape(red)}\b", re.IGNORECASE)
+        matches = pattern.findall(patched)
+        if matches:
+            patched = pattern.sub(concise, patched)
+            replacements.append({
+                "type": "redundancy",
+                "category": "Redundancy Removal",
+                "original": red,
+                "replacement": concise,
+                "occurrences": len(matches),
+            })
+
+    # 3. Jargon Simplifications
+    for jg, plain in COMMON_JARGON_REPLACEMENTS.items():
+        pattern = re.compile(rf"\b{re.escape(jg)}\b", re.IGNORECASE)
+        matches = pattern.findall(patched)
+        if matches:
+            clean_plain = plain.split("/")[0].strip()
+            patched = pattern.sub(clean_plain, patched)
+            replacements.append({
+                "type": "jargon",
+                "category": "Jargon Simplification",
+                "original": jg,
+                "replacement": clean_plain,
+                "occurrences": len(matches),
+            })
+
+    orig_words = len(re.findall(r"\b\w+\b", clean_text))
+    new_words = len(re.findall(r"\b\w+\b", patched))
+    words_saved = max(0, orig_words - new_words)
+
+    return {
+        "original_text": clean_text,
+        "patched_text": patched,
+        "total_replacements": sum(r["occurrences"] for r in replacements),
+        "replacements": replacements,
+        "spelling_fixes": [r for r in replacements if r["type"] == "spelling"],
+        "redundancy_fixes": [r for r in replacements if r["type"] == "redundancy"],
+        "jargon_fixes": [r for r in replacements if r["type"] == "jargon"],
+        "original_word_count": orig_words,
+        "patched_word_count": new_words,
+        "words_saved": words_saved,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 7. AEO & GEO (AI SEARCH ENGINE OPTIMIZATION) SCORING ENGINE
+# ---------------------------------------------------------------------------
+def evaluate_aeo_readiness(page_data, keyword=None):
+    """
+    Evaluates content for AEO (Answer Engine Optimization) & GEO (Generative Engine Optimization).
+    Measures likelihood of citations by Perplexity, ChatGPT Search, and Google AI Overviews (SGE).
+    Scored from 0 to 100 across 4 pillars (25 pts each):
+    1. Direct Answer Delivery (Clear answers in headings and opening paragraphs)
+    2. Quantitative Data & Entity Density (metrics, %, $, years)
+    3. Authority Attribution & Quotations (citations, source attribution)
+    4. Structured Extractability (lists, tables, FAQ schema)
+    """
+    clean_text = page_data.get("clean_text", "")
+    word_count = len(re.findall(r"\b\w+\b", clean_text))
+    criteria = []
+
+    # Pillar 1: Direct Answer Delivery (0 - 25 pts)
+    answer_starter_pattern = re.compile(
+        r"(?i)\b(?:is defined as|refers to|works by|consists of|to achieve this|the primary cause|the key difference|for example|in summary|steps to|first,|the best way)\b"
+    )
+    starters_found = len(answer_starter_pattern.findall(clean_text))
+    if starters_found >= 4:
+        p1_score = 25
+        p1_status = "good"
+        p1_advice = f"Strong direct answer delivery detected ({starters_found} direct answer markers found)."
+    elif starters_found >= 1:
+        p1_score = 15
+        p1_status = "ok"
+        p1_advice = f"Moderate direct answer markers ({starters_found}). Ensure every H2 section answers the user's question directly in the first 2 sentences."
+    else:
+        p1_score = 5
+        p1_status = "bad"
+        p1_advice = "No direct answer structures detected. AI engines cite concise definition sentences (e.g. '[Concept] is...') placed immediately under headings."
+
+    criteria.append({
+        "pillar": "Direct Answer Delivery",
+        "score": p1_score,
+        "max": 25,
+        "status": p1_status,
+        "advice": p1_advice,
+    })
+
+    # Pillar 2: Quantitative Data & Entity Density (0 - 25 pts)
+    stats_matches = re.findall(r"\b\d+[\.,]?\d*%\b|\$\d+[\.,]?\d*|\b(?:19\d\d|20[2-9]\d)\b", clean_text)
+    stats_count = len(stats_matches)
+    stats_per_1k = round((stats_count / max(1, word_count)) * 1000, 1)
+
+    if stats_per_1k >= 6 or stats_count >= 8:
+        p2_score = 25
+        p2_status = "good"
+        p2_advice = f"Excellent empirical data density ({stats_count} data/date/metric points detected, ~{stats_per_1k}/1,000 words)."
+    elif stats_per_1k >= 2 or stats_count >= 3:
+        p2_score = 15
+        p2_status = "ok"
+        p2_advice = f"Moderate data density ({stats_count} metrics). Generative engines heavily favor articles containing specific statistics, benchmarks, or dates."
+    else:
+        p2_score = 5
+        p2_status = "bad"
+        p2_advice = "Low factual data density. Add concrete percentages, monetary figures, years, or study findings to increase citation probability."
+
+    criteria.append({
+        "pillar": "Factual & Entity Density",
+        "score": p2_score,
+        "max": 25,
+        "status": p2_status,
+        "advice": p2_advice,
+    })
+
+    # Pillar 3: Authority Attribution & Source Anchors (0 - 25 pts)
+    in_text_sources = page_data.get("in_text_sources", 0)
+    citation_links = page_data.get("citation_links", [])
+    total_sources = in_text_sources + len(citation_links)
+
+    if total_sources >= 3:
+        p3_score = 25
+        p3_status = "good"
+        p3_advice = f"Authoritative attribution present ({in_text_sources} in-text source phrases, {len(citation_links)} authority citations)."
+    elif total_sources >= 1:
+        p3_score = 15
+        p3_status = "ok"
+        p3_advice = "Some source attribution present. Include explicit phrases like 'According to research by...' or citations to academic/government domains."
+    else:
+        p3_score = 5
+        p3_status = "bad"
+        p3_advice = "Missing explicit source citations. LLMs penalize unsubstantiated claims and prioritize corroborated source references."
+
+    criteria.append({
+        "pillar": "Authority Citations & Sources",
+        "score": p3_score,
+        "max": 25,
+        "status": p3_status,
+        "advice": p3_advice,
+    })
+
+    # Pillar 4: Structured Extractability (0 - 25 pts)
+    has_schema = bool(page_data.get("schema_types"))
+    has_faq_schema = any("faq" in str(s).lower() for s in page_data.get("schema_types", []))
+    has_steps_or_bullets = bool(re.search(r"(?m)^\s*[\*\-\•\d+\.]\s+", clean_text) or re.search(r"\b(?:step 1|step 2|1\.|2\.)\b", clean_text, re.I))
+
+    p4_score = 0
+    if has_steps_or_bullets:
+        p4_score += 10
+    if has_schema:
+        p4_score += 10
+    if has_faq_schema:
+        p4_score += 5
+    p4_score = min(25, p4_score)
+
+    if p4_score >= 20:
+        p4_status = "good"
+        p4_advice = "High structural extractability (bullet points/numbered steps and JSON-LD schema detected)."
+    elif p4_score >= 10:
+        p4_status = "ok"
+        p4_advice = "Moderate extractability. Add FAQPage schema or numbered step-by-step procedures to assist AI snippet extraction."
+    else:
+        p4_score = 5
+        p4_status = "bad"
+        p4_advice = "Poor extractability. Long unbroken text without bullet points or Schema.org markup is rarely selected for AI Overview cards."
+
+    criteria.append({
+        "pillar": "Structured Extractability",
+        "score": p4_score,
+        "max": 25,
+        "status": p4_status,
+        "advice": p4_advice,
+    })
+
+    total_aeo = sum(c["score"] for c in criteria)
+    if total_aeo >= 80:
+        verdict = "🟢 High AIO & Perplexity Citation Probability"
+    elif total_aeo >= 60:
+        verdict = "🟠 Moderate Citation Probability (Needs Data Density)"
+    else:
+        verdict = "🔴 Low Citation Probability (Content lacks structured proof points)"
+
+    return {
+        "aeo_score": total_aeo,
+        "verdict": verdict,
+        "criteria": criteria,
+        "pillars": {c["pillar"]: c["score"] for c in criteria},
+        "observations": [c["advice"] for c in criteria],
+        "stats_count": stats_count,
+        "attributions_count": total_sources,
+        "extractability_score": p4_score,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 8. COMPETITOR SEMANTIC GAP & TF-IDF / N-GRAM ANALYZER
+# ---------------------------------------------------------------------------
+def analyze_competitor_semantic_gap(target_data, competitor_profiles, top_n=15, target_keyword=None):
+    """
+    Performs comparative semantic gap and TF-IDF analysis between the target
+    blog post and crawled top ranking competitors.
+    Returns:
+    - Missing semantic keywords
+    - Subtopic / Heading coverage gaps
+    - Benchmarking metrics (Word count, Images, Citations)
+    """
+    target_text = (target_data.get("clean_text") or "").lower()
+    target_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", target_text))
+    target_h2s = [h.lower() for h in target_data.get("h2_list", [])]
+    target_keyword = target_keyword or target_data.get("suggested_keyword") or ""
+
+    if not competitor_profiles:
+        return {
+            "success": False,
+            "target_keyword": target_keyword,
+            "message": "No competitor profiles available for semantic gap comparison.",
+            "missing_keywords": [],
+            "missing_terms": [],
+            "top_competitor_terms": [],
+            "missing_topics": [],
+            "benchmarks": {},
+        }
+
+    from crawler import STOP_WORDS
+
+    comp_unigrams = {}
+    comp_h2_topics = []
+    total_comp_words = 0
+    total_comp_imgs = 0
+    total_comp_citations = 0
+
+    for comp in competitor_profiles:
+        words = comp.get("words")
+        if not words and comp.get("clean_text"):
+            words = re.findall(r"\b[a-zA-Z]{3,}\b", comp["clean_text"].lower())
+        words = words or []
+        total_comp_words += comp.get("word_count", 0) or len(words)
+        total_comp_imgs += comp.get("images_count", 0)
+        total_comp_citations += comp.get("citations_count", 0)
+
+        for w in words:
+            w_lower = w.lower()
+            if len(w_lower) >= 4 and w_lower not in STOP_WORDS:
+                comp_unigrams[w_lower] = comp_unigrams.get(w_lower, 0) + 1
+
+        for h2 in comp.get("h2_list", []):
+            comp_h2_topics.append({"topic": h2, "competitor_url": comp.get("url", "")})
+
+    num_comps = max(1, len(competitor_profiles))
+    avg_words = round(total_comp_words / num_comps)
+    avg_imgs = round(total_comp_imgs / num_comps, 1)
+    avg_citations = round(total_comp_citations / num_comps, 1)
+
+    sorted_comp_words = sorted(comp_unigrams.items(), key=lambda x: x[1], reverse=True)
+    missing_kw = []
+    found_kw = []
+
+    for w, freq in sorted_comp_words:
+        if w not in target_words:
+            missing_kw.append({
+                "keyword": w,
+                "competitor_frequency": freq,
+                "importance": "High Impact" if freq >= 4 else "Medium Impact"
+            })
+        else:
+            found_kw.append(w)
+        if len(missing_kw) >= top_n:
+            break
+
+    missing_topics = []
+    for t_item in comp_h2_topics:
+        topic_text = t_item["topic"]
+        topic_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", topic_text.lower()))
+        matched = False
+        for th in target_h2s:
+            th_words = set(re.findall(r"\b[a-zA-Z]{3,}\b", th))
+            if len(topic_words.intersection(th_words)) >= 2:
+                matched = True
+                break
+        if not matched and len(topic_text) > 8:
+            missing_topics.append(topic_text)
+
+    unique_missing_topics = list(dict.fromkeys(missing_topics))[:8]
+
+    target_word_count = len(target_data.get("words", []))
+    target_img_count = len(target_data.get("images", []))
+    target_cit_count = len(target_data.get("citation_links", []))
+
+    benchmarks = {
+        "word_count": {
+            "target": target_word_count,
+            "competitor_avg": avg_words,
+            "gap": target_word_count - avg_words,
+            "status": "Ahead" if target_word_count >= avg_words else f"Short by {avg_words - target_word_count:,} words"
+        },
+        "images": {
+            "target": target_img_count,
+            "competitor_avg": avg_imgs,
+            "gap": target_img_count - avg_imgs,
+            "status": "Ahead" if target_img_count >= avg_imgs else f"Add {round(avg_imgs - target_img_count)} images"
+        },
+        "citations": {
+            "target": target_cit_count,
+            "competitor_avg": avg_citations,
+            "gap": target_cit_count - avg_citations,
+            "status": "Ahead" if target_cit_count >= avg_citations else f"Add {round(avg_citations - target_cit_count)} authority links"
+        }
+    }
+
+    return {
+        "success": True,
+        "target_keyword": target_keyword,
+        "competitor_count": len(competitor_profiles),
+        "missing_keywords": missing_kw,
+        "missing_terms": [{"term": m["keyword"], "freq": m["competitor_frequency"]} for m in missing_kw],
+        "top_competitor_terms": [w for w, _ in sorted_comp_words[:top_n]],
+        "found_keywords_count": len(found_kw),
+        "missing_subtopics": unique_missing_topics,
+        "benchmarks": benchmarks,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 9. AUTONOMOUS FULL PIPELINE RUNNER
+# ---------------------------------------------------------------------------
+def run_autonomous_pipeline(url_or_text, keyword=None, serpapi_key=None, ai_key=None, ai_provider="deepseek", ai_model=None, save_history=True):
+    """
+    Executes an autonomous closed-loop audit & remediation run in a single pass:
+    1. Crawls or parses content
+    2. Audits 7 pillars + Yoast + AEO
+    3. Applies safe text simplifications
+    4. Gathers SERP intelligence and competitor semantic gaps (if SerpApi key provided)
+    5. Runs AI Strategic Audit and FAQ Schema (if AI key provided)
+    6. Persists snapshot to SQLite history
+    """
+    from crawler import fetch_html, parse_page_data
+    from api_integrations import fetch_serp_intelligence, fetch_competitor_content, generate_deepseek_audit, generate_ai_faq_schema
+    import db_history
+
+    if isinstance(url_or_text, dict):
+        article_data = url_or_text
+    else:
+        is_url = url_or_text.strip().startswith(("http://", "https://")) or ("." in url_or_text.split()[0] and "/" in url_or_text.split()[0])
+
+        if is_url:
+            fetch_res = fetch_html(url_or_text)
+            article_data = parse_page_data(fetch_res)
+        else:
+            words = re.findall(r"\b[\w'-]+\b", url_or_text)
+            sentences = [s.strip() for s in re.split(r"[.!?]+", url_or_text) if s.strip()]
+            paragraphs = [p.strip() for p in re.split(r"\n\s*\n", url_or_text) if p.strip()]
+            h1 = paragraphs[0][:80] if paragraphs else "Draft Post"
+            article_data = {
+                "url": "Offline Draft",
+                "final_url": "Offline Draft",
+                "title": h1,
+                "meta_description": paragraphs[1][:150] if len(paragraphs) > 1 else "",
+                "clean_text": url_or_text,
+                "words": words,
+                "word_count": len(words),
+                "sentence_count": len(sentences),
+                "paragraph_count": len(paragraphs),
+                "reading_time_min": round(len(words) / 200, 1),
+            "headings": [{"tag": "h1", "level": 1, "text": h1}],
+            "h1_list": [h1],
+            "h2_list": [],
+            "h3_list": [],
+            "h4_list": [],
+            "hierarchy_valid": True,
+            "images": [],
+            "images_without_alt": [],
+            "links": [],
+            "internal_links_count": 0,
+            "external_links_count": 0,
+            "nofollow_links_count": 0,
+            "citation_links": [],
+            "in_text_sources": 0,
+            "opengraph": {},
+            "twitter_cards": {},
+            "schema_types": [],
+            "json_ld_list": [],
+            "readability": {"flesch_reading_ease": 60.0, "flesch_kincaid_grade": 8.0},
+            "long_sentences": [],
+            "top_unigrams": [],
+            "top_bigrams": [],
+            "suggested_keyword": keyword or "",
+        }
+
+    audit_results = audit_page(article_data, keyword=keyword)
+    patch_result = apply_safe_simplifications(article_data["clean_text"])
+
+    serp_data = None
+    competitor_gap = None
+    if serpapi_key and audit_results.get("keyword"):
+        serp_data = fetch_serp_intelligence(audit_results["keyword"], api_key=serpapi_key)
+        if serp_data.get("success") and serp_data.get("competitors"):
+            comp_profiles = fetch_competitor_content(serp_data["competitors"], max_comp=3)
+            competitor_gap = analyze_competitor_semantic_gap(article_data, comp_profiles)
+
+    ai_audit = None
+    faq_schema = None
+    if ai_key:
+        ai_audit = generate_deepseek_audit(article_data, audit_results, api_key=ai_key, model=ai_model, provider=ai_provider)
+        paa = serp_data.get("people_also_ask", []) if (serp_data and serp_data.get("success")) else []
+        faq_schema = generate_ai_faq_schema(article_data, paa, api_key=ai_key, model=ai_model, provider=ai_provider)
+
+    snapshot_id = None
+    if save_history:
+        try:
+            snapshot_id = db_history.save_audit_snapshot(article_data, audit_results)
+        except Exception:
+            pass
+
+    return {
+        "article_data": article_data,
+        "audit_results": audit_results,
+        "safe_patch": patch_result,
+        "serp_data": serp_data,
+        "competitor_gap": competitor_gap,
+        "ai_audit": ai_audit,
+        "faq_schema": faq_schema,
+        "snapshot_id": snapshot_id,
+        "audit": audit_results,
+        "patch": patch_result,
+        "yoast": audit_results.get("yoast"),
+        "aeo": audit_results.get("aeo"),
+    }
+
 
 

@@ -4,6 +4,7 @@ import crawler
 import audit_engine
 import api_integrations
 import export_helper
+import db_history
 
 class TestBlogGuard(unittest.TestCase):
     def test_readability_calculations(self):
@@ -261,5 +262,166 @@ class TestBlogGuard(unittest.TestCase):
         sync_err = api_integrations.update_wp_yoast_meta("", "", "", "")
         self.assertFalse(sync_err["success"])
 
+    def test_db_history_lifecycle(self):
+        sample_page = {
+            "title": "History Test Blog",
+            "url": "https://test.com/history-test",
+            "final_url": "https://test.com/history-test",
+        }
+        sample_audit = {
+            "overall_score": 88,
+            "keyword": "history test",
+            "scores": {"Technical SEO": 90, "Content & Readability": 85},
+            "word_count": 500,
+            "reading_time_min": 2.5,
+            "readability": {"flesch_reading_ease": 70.0, "flesch_kincaid_grade": 7.0},
+            "issues": ["Issue 1"],
+            "aeo": {"aeo_score": 84},
+            "yoast": {"seo_verdict": "Good", "readability_verdict": "Good"},
+        }
+        snap_id = db_history.save_audit_snapshot(sample_page, sample_audit)
+        self.assertIsNotNone(snap_id)
+        self.assertGreater(snap_id, 0)
+
+        history = db_history.get_audit_history(limit=10)
+        self.assertGreater(len(history), 0)
+        latest = history[0]
+        self.assertEqual(latest["title"], "History Test Blog")
+        self.assertEqual(latest["overall_score"], 88)
+
+        # Check velocity
+        velocity = db_history.get_url_velocity("https://test.com/history-test")
+        self.assertGreaterEqual(velocity["total_audits"], 1)
+        self.assertEqual(velocity["latest_score"], 88)
+
+        # Delete snapshot
+        deleted = db_history.delete_snapshot(snap_id)
+        self.assertTrue(deleted)
+
+    def test_aeo_readiness_scoring(self):
+        sample_data = {
+            "clean_text": "Search engine optimization is the art of ranking websites. In 2026, over 55% of search results feature AI overviews according to Gartner.com research.",
+            "headings": [
+                {"tag": "h2", "level": 2, "text": "What is Search Engine Optimization?"},
+                {"tag": "h2", "level": 2, "text": "How Does Technical SEO Work?"}
+            ],
+            "citation_links": [{"href": "https://gartner.com/report", "text": "Gartner.com"}],
+            "schema_types": ["Article", "FAQPage"],
+        }
+        aeo = audit_engine.evaluate_aeo_readiness(sample_data, keyword="search engine optimization")
+        self.assertIn("aeo_score", aeo)
+        self.assertGreaterEqual(aeo["aeo_score"], 0)
+        self.assertLessEqual(aeo["aeo_score"], 100)
+        self.assertIn("pillars", aeo)
+        self.assertIn("Direct Answer Delivery", aeo["pillars"])
+        self.assertIn("observations", aeo)
+
+    def test_apply_safe_simplifications(self):
+        messy_text = (
+            "We must utilize this strategy in order to acheive growth. "
+            "Furthermore, at this point in time we have alot of learnings. "
+            "Leverage these learnings to move the needle."
+        )
+        patched = audit_engine.apply_safe_simplifications(messy_text)
+        self.assertGreater(patched["total_replacements"], 0)
+        self.assertIn("utilize", [r["original"] for r in patched["replacements"]])
+        self.assertNotIn("acheive", patched["patched_text"])
+        self.assertIn("achieve", patched["patched_text"])
+        self.assertGreater(patched["words_saved"], 0)
+
+    def test_competitor_semantic_gap(self):
+        user_data = {
+            "clean_text": "We provide cloud hosting and managed servers for modern web applications.",
+            "headings": [{"tag": "h2", "level": 2, "text": "Cloud Hosting"}],
+            "words": ["cloud", "hosting", "managed", "servers"] * 25,
+            "images": [{"has_alt": True}],
+            "citation_links": [],
+        }
+        competitors = [
+            {
+                "title": "Best Cloud Hosting & Dedicated Servers 2026",
+                "clean_text": "Our cloud hosting platform delivers kubernetes clusters, serverless containers, database replication, and edge networking for enterprise organizations.",
+                "headings": ["Kubernetes Clusters", "Edge Networking", "Database Replication"],
+                "word_count": 800,
+                "image_count": 5,
+                "citation_count": 3,
+            }
+        ]
+        gap = audit_engine.analyze_competitor_semantic_gap(user_data, competitors, target_keyword="cloud hosting")
+        self.assertIn("target_keyword", gap)
+        self.assertIn("top_competitor_terms", gap)
+        self.assertIn("missing_terms", gap)
+        missing_words = [m["term"] for m in gap["missing_terms"]]
+        self.assertTrue("kubernetes" in missing_words or "networking" in missing_words or "replication" in missing_words)
+
+    def test_autonomous_pipeline(self):
+        sample_page = {
+            "title": "Autonomous Pipeline SEO Test",
+            "meta_description": "A complete guide to autonomous SEO testing and remediation.",
+            "url": "https://test.com/auto-pipeline",
+            "final_url": "https://test.com/auto-pipeline",
+            "clean_text": "In order to optimize web pages, technical seo is critical. We must utilize best practices.",
+            "words": ["technical", "seo", "optimize", "practices"] * 50,
+            "headings": [{"tag": "h1", "level": 1, "text": "Autonomous Pipeline SEO Test"}],
+            "h1_list": ["Autonomous Pipeline SEO Test"],
+            "h2_list": ["SEO Practices"],
+            "h3_list": [],
+            "images": [],
+            "images_without_alt": [],
+            "citation_links": [],
+            "internal_links_count": 1,
+            "in_text_sources": 0,
+            "schema_types": ["Article"],
+            "readability": {"flesch_reading_ease": 65.0, "flesch_kincaid_grade": 7.0, "avg_sentence_length": 15, "complex_words": 10},
+            "long_sentences": [],
+            "suggested_keyword": "technical seo",
+            "status_code": 200,
+            "load_time_sec": 0.2,
+            "engine": "Fast HTTP",
+        }
+        auto_res = audit_engine.run_autonomous_pipeline(sample_page, keyword="technical seo")
+        self.assertIn("audit", auto_res)
+        self.assertIn("patch", auto_res)
+        self.assertIn("yoast", auto_res)
+        self.assertIn("aeo", auto_res)
+        self.assertGreater(auto_res["audit"]["overall_score"], 0)
+
+    def test_cms_platform_detection(self):
+        wp_html = "<html><head><meta name='generator' content='WordPress 6.4.2' /><link rel='https://api.w.org/' href='https://example.com/wp-json/' /></head></html>"
+        cms = api_integrations.detect_cms_platform("https://example.com", html_content=wp_html)
+        self.assertEqual(cms["platform"], "WordPress")
+        self.assertGreaterEqual(cms["confidence"], 80)
+
+        ghost_html = "<html><head><meta name='generator' content='Ghost 5.80' /></head></html>"
+        cms_ghost = api_integrations.detect_cms_platform("https://example.com", html_content=ghost_html)
+        self.assertEqual(cms_ghost["platform"], "Ghost")
+
+    def test_sitemap_and_link_health(self):
+        # Invalid / mock sitemap URL
+        res = crawler.discover_and_parse_sitemap("invalid-url-1234567")
+        self.assertFalse(res["success"])
+        self.assertIn("error", res)
+
+        # Mock links audit
+        test_links = [
+            {"href": "https://example.com", "text": "Example Domain", "is_internal": False},
+            {"href": "http://insecure.example.com", "text": "Insecure Link", "is_internal": False},
+        ]
+        lh = crawler.audit_links_health(test_links, base_url="https://example.com", max_check=2)
+        self.assertEqual(lh["total_checked"], 2)
+        self.assertGreaterEqual(lh["mixed_content_count"], 1)
+
+    def test_multi_llm_copilot_validation(self):
+        # Missing key returns clean error, never unhandled exception
+        res_ds = api_integrations.query_ai_copilot("test prompt", provider="deepseek", api_key="")
+        self.assertIn("error", res_ds)
+
+        res_gem = api_integrations.query_ai_copilot("test prompt", provider="gemini", api_key="")
+        self.assertIn("error", res_gem)
+
+        res_oa = api_integrations.query_ai_copilot("test prompt", provider="openai", api_key="")
+        self.assertIn("error", res_oa)
+
 if __name__ == "__main__":
     unittest.main()
+

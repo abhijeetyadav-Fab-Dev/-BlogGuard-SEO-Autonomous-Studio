@@ -9,9 +9,10 @@ import crawler
 import audit_engine
 import api_integrations
 import export_helper
+import db_history
 
 # Force-reload local modules on every run so any long-running Streamlit process gets latest code
-for _mod in [crawler, audit_engine, api_integrations, export_helper]:
+for _mod in [crawler, audit_engine, api_integrations, export_helper, db_history]:
     try:
         importlib.reload(_mod)
     except Exception:
@@ -196,22 +197,31 @@ with st.sidebar:
     )
     enable_serp = st.checkbox("Run Live Google SERP Analysis", value=bool(serpapi_key))
 
-    # 2. DeepSeek AI
-    st.markdown("**DeepSeek AI Copilot**")
-    deepseek_key = st.text_input(
-        "DeepSeek API Key",
-        value=st.session_state.deepseek_key,
-        type="password",
-        help="Powers the autonomous editorial critique, title/meta generator, and FAQ schema."
+    # 2. Multi-LLM AI Copilot Hub
+    st.markdown("**🧠 Multi-LLM AI Copilot Hub**")
+    ai_provider = st.selectbox(
+        "AI Provider",
+        ["🤖 DeepSeek", "⚡ Google Gemini", "🧠 OpenAI"],
+        index=0,
+        help="Switch seamlessly between DeepSeek, Google Gemini, and OpenAI."
     )
-    if deepseek_key:
-        st.session_state.deepseek_key = deepseek_key
+    selected_provider_slug = "gemini" if "Gemini" in ai_provider else ("openai" if "OpenAI" in ai_provider else "deepseek")
 
-    deepseek_model = st.selectbox(
-        "AI Model",
-        ["deepseek-chat", "deepseek-reasoner"],
-        help="deepseek-chat for speed, deepseek-reasoner (R1) for rigorous strategic reasoning."
-    )
+    if selected_provider_slug == "gemini":
+        default_ai_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+        ai_key = st.text_input("Google Gemini API Key", value=st.session_state.get("gemini_key", default_ai_key), type="password", help="Powers Gemini 1.5 Flash / Pro reasoning.")
+        st.session_state.gemini_key = ai_key
+        ai_model = st.selectbox("Gemini Model", ["gemini-1.5-flash", "gemini-1.5-pro"])
+    elif selected_provider_slug == "openai":
+        default_ai_key = os.environ.get("OPENAI_API_KEY", "")
+        ai_key = st.text_input("OpenAI API Key", value=st.session_state.get("openai_key", default_ai_key), type="password", help="Powers GPT-4o / GPT-4o-mini reasoning.")
+        st.session_state.openai_key = ai_key
+        ai_model = st.selectbox("OpenAI Model", ["gpt-4o-mini", "gpt-4o"])
+    else:
+        default_ai_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        ai_key = st.text_input("DeepSeek API Key", value=st.session_state.get("deepseek_key", default_ai_key), type="password", help="Powers DeepSeek R1 / V3 reasoning.")
+        st.session_state.deepseek_key = ai_key
+        ai_model = st.selectbox("DeepSeek Model", ["deepseek-chat", "deepseek-reasoner"])
 
     # 3. Google PageSpeed
     st.markdown("**Google PageSpeed Insights**")
@@ -343,6 +353,10 @@ if audit_mode == "🌐 Autonomous Live URL Audit":
                         "pagespeed": ps_res,
                     }
                     st.session_state.results.insert(0, full_record)
+                    try:
+                        db_history.save_audit_snapshot(page_data, audit_res)
+                    except Exception:
+                        pass
                     status.update(label=f"Audit complete! Score: {audit_res['overall_score']}/100 ({audit_res['status']})", state="complete")
                     st.rerun()
 
@@ -536,6 +550,10 @@ elif audit_mode == "📑 Batch / Multi-URL Audit":
                             "serp": None,
                             "pagespeed": None,
                         })
+                        try:
+                            db_history.save_audit_snapshot(p_data, a_res)
+                        except Exception:
+                            pass
                         success_count += 1
                         st.write(f"✅ Success: **{p_data['title']}** (Score: {a_res['overall_score']}/100)")
                     else:
@@ -673,6 +691,10 @@ In order to optimize your technical seo performance, audit your XML sitemaps reg
                 "serp": None,
                 "pagespeed": None,
             })
+            try:
+                db_history.save_audit_snapshot(mock_data, a_res)
+            except Exception:
+                pass
             st.success("✅ Draft audited successfully! View the full scorecard below.")
             st.rerun()
 
@@ -715,33 +737,68 @@ else:
     st.caption(f"**URL:** {c_data['url']} | **Focus Keyword:** `{c_audit['keyword']}` | **Engine:** `{c_data.get('engine', 'HTTP')}`")
 
     # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Hero Metric Strip
     # -------------------------------------------------------------------------
+    aeo_val = c_audit.get("aeo", {}).get("aeo_score", 0)
     mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
     with mcol1:
         st.metric("Overall Score", f"{c_audit['overall_score']}/100")
     with mcol2:
-        st.metric("Word Count", f"{c_audit['word_count']:,}")
+        st.metric("AEO Citation", f"{aeo_val}/100")
     with mcol3:
-        st.metric("Read Time", f"{c_audit['reading_time_min']} min")
+        st.metric("Word Count", f"{c_audit['word_count']:,}")
     with mcol4:
-        st.metric("Flesch Ease", f"{c_audit['readability']['flesch_reading_ease']}/100")
+        st.metric("Read Time", f"{c_audit['reading_time_min']} min")
     with mcol5:
-        st.metric("H1 / H2 Headings", f"{c_audit['h1_count']} / {c_audit['h2_count']}")
+        st.metric("Flesch Ease", f"{c_audit['readability']['flesch_reading_ease']}/100")
     with mcol6:
         st.metric("Outbound Citations", c_audit['citations_count'])
 
     # -------------------------------------------------------------------------
-    # TABS SECTION: The 9 Power Centers
+    # Autonomous 1-Click Auto-Pilot Banner
+    # -------------------------------------------------------------------------
+    with st.container():
+        auto_c1, auto_c2 = st.columns([3, 1])
+        with auto_c1:
+            st.markdown("### 🚀 Autonomous Closed-Loop Auto-Pilot")
+            st.caption("Executes crawling, Google SERP, competitor semantic gap, AI strategic audit, FAQ schema generation, and safe auto-patching in a single pass.")
+        with auto_c2:
+            if st.button("⚡ Run Full Auto-Pilot", type="primary", use_container_width=True, key=f"auto_pilot_btn_{selected_idx}"):
+                with st.spinner("Executing full autonomous pipeline..."):
+                    target_to_audit = c_data["url"] if c_data.get("url") not in ("Draft Article", "Manual Draft / Offline") else c_data["clean_text"]
+                    pipe_res = audit_engine.run_autonomous_pipeline(
+                        target_to_audit,
+                        keyword=c_audit["keyword"],
+                        serpapi_key=serpapi_key if enable_serp else None,
+                        ai_key=ai_key,
+                        ai_provider=selected_provider_slug,
+                        ai_model=ai_model,
+                        save_history=True
+                    )
+                    st.success("🎉 Full Autonomous Pipeline completed! Check AEO Studio, Competitor Gap, and In-Text Fixer below.")
+                    st.session_state[f"patch_{selected_idx}"] = pipe_res["safe_patch"]
+                    if pipe_res.get("competitor_gap"):
+                        st.session_state[f"comp_gap_{selected_idx}"] = pipe_res["competitor_gap"]
+                    if pipe_res.get("ai_audit") and pipe_res["ai_audit"].get("success"):
+                        st.session_state.ai_audit_cache[c_data["url"]] = pipe_res["ai_audit"]
+                    st.rerun()
+
+    # -------------------------------------------------------------------------
+    # TABS SECTION: The 16 Power Centers
     # -------------------------------------------------------------------------
     tabs = st.tabs([
         "📊 360° Scorecard",
         "🚨 Actionable Issues",
+        "🌐 AEO & AI Overview Studio",
+        "📊 Competitor Semantic Gap",
+        "🎨 In-Text Highlighter & 1-Click Fixer",
         "🔍 Grammar, Clarity & Alignment",
-        "🎨 In-Text Issue Highlighter",
         "🚦 Yoast SEO & REST API Studio",
+        "🕷️ Sitemap & Link Sentinel",
+        "📈 Audit History & Velocity",
         "🔍 Google SERP (SerpApi)",
-        "🧠 DeepSeek AI Copilot",
+        "🧠 Multi-LLM AI Copilot",
         "⚡ Core Web Vitals",
         "📱 SERP & Social Preview",
         "📑 Content Hierarchy",
@@ -821,125 +878,122 @@ else:
             st.info("💡 **Tip:** Switch to the **'🎨 In-Text Issue Highlighter'** tab above to see these exact jargon words, run-on sentences, and typos highlighted live inside your article!")
 
     # -------------------------------------------------------------------------
-    # TAB 3: Grammar, Clarity & Content-Information Alignment
+    # TAB 3: AEO (Answer Engine Optimization) & GEO Citation Studio
     # -------------------------------------------------------------------------
     with tabs[2]:
-        st.subheader("🔍 Grammar, Clarity & Content-Information Alignment")
-        st.caption("Comprehensive analysis of linguistic precision, passive voice, wordy redundancies, reading clarity, and title-to-content promise delivery.")
+        st.subheader("🌐 AEO & GEO (AI Search Engine Optimization) Studio")
+        st.caption("Grades content readiness for citation in Google AI Overviews (SGE), Perplexity AI, ChatGPT Search, and Microsoft Copilot.")
 
-        align = c_audit.get("content_alignment", {})
-        passive = c_audit.get("passive_voice", {})
-        red_list = c_audit.get("redundancies", [])
-        clarity_score = c_audit.get("clarity_score", 0)
+        aeo = c_audit.get("aeo") or audit_engine.evaluate_aeo_readiness(c_data, keyword=c_audit.get("keyword"))
+        aeo_score = aeo.get("aeo_score", 0)
+        aeo_verdict = aeo.get("verdict", "N/A")
 
-        # 4 Core Pillar Metrics
-        gcol1, gcol2, gcol3, gcol4 = st.columns(4)
-        with gcol1:
-            align_score = align.get("score", 0)
-            align_delta = "High Alignment" if align_score >= 80 else ("Moderate Drift" if align_score >= 60 else "Major Mismatch")
-            st.metric("Headline Alignment", f"{align_score}/100", align_delta)
-        with gcol2:
-            clarity_delta = "Crisp & Clear" if clarity_score >= 80 else ("Acceptable" if clarity_score >= 60 else "Dense/Complex")
-            st.metric("Clarity & Flow Index", f"{clarity_score}/100", clarity_delta)
-        with gcol3:
-            pv_pct = passive.get("percentage", 0.0)
-            pv_delta = "Active Voice" if pv_pct <= 10 else ("Acceptable" if pv_pct <= 20 else "Too Passive")
-            st.metric("Passive Voice", f"{pv_pct}%", f"{passive.get('count', 0)} sentences ({pv_delta})", delta_color="inverse" if pv_pct > 15 else "normal")
-        with gcol4:
-            total_red_count = sum(r.get("count", 0) for r in red_list)
-            st.metric("Wordy Redundancies", f"{len(red_list)} phrases", f"{total_red_count} total occurrences")
+        acol1, acol2, acol3 = st.columns([1, 2, 1])
+        with acol1:
+            st.metric("AEO Citation Score", f"{aeo_score}/100")
+        with acol2:
+            st.markdown(f"#### {aeo_verdict}")
+            st.caption("AI search engines synthesize direct answers from articles with high factual entity density, explicit source attribution, and structured formatting.")
+        with acol3:
+            st.metric("Quantitative Proof Points", f"{aeo.get('stats_count', 0)} detected")
 
         st.divider()
+        st.markdown("### 🏛️ The 4 AEO / GEO Foundations")
 
-        # Section 1: Headline to Content Alignment & Promise Delivery
-        st.markdown("### 🎯 Headline-to-Content Promise Fulfillment")
-        st.caption("Evaluates whether the article actually delivers on what the title promises, verifying H1/H2 topic alignment and listicle/how-to structure.")
-
-        obs = align.get("observations", [])
-        if obs:
-            for ob in obs:
-                if ob.startswith("✅"):
-                    st.success(ob)
-                elif ob.startswith("⚠️"):
-                    st.warning(ob)
-                elif ob.startswith("❌"):
-                    st.error(ob)
-                else:
-                    st.info(ob)
-        else:
-            st.info("Content structure matches title expectations.")
+        crit_cols = st.columns(4)
+        for idx, crit in enumerate(aeo.get("criteria", [])):
+            with crit_cols[idx % 4]:
+                st.markdown(f"**{crit['pillar']}**")
+                st.metric("Score", f"{crit['score']}/{crit['max']}")
+                status_icon = "🟢" if crit["status"] == "good" else ("🟠" if crit["status"] == "ok" else "🔴")
+                st.write(f"{status_icon} {crit['advice']}")
 
         st.divider()
-
-        # Section 2: Passive Voice Analysis & Improvement
-        st.markdown("### 🗣️ Passive Voice vs Active Voice")
-        st.caption("Active voice makes your writing direct, authoritative, and engaging. Google and readers prefer clear subject-action constructions.")
-
-        if passive.get("count", 0) == 0:
-            st.success("🎉 Excellent! Zero passive voice constructions detected. Your writing is fully active and punchy.")
-        else:
-            if pv_pct > 15:
-                st.warning(f"⚠️ {pv_pct}% of your sentences use passive voice (industry target: under 10%).")
-            else:
-                st.info(f"Passive voice is at {pv_pct}% ({passive.get('count', 0)} sentences), which is within acceptable limits.")
-
-            with st.expander(f"Inspect Detected Passive Voice Sentences ({passive.get('count', 0)} found)", expanded=(pv_pct > 15)):
-                for psent in passive.get("sentences", []):
-                    st.markdown(f"- 🔵 *\"{psent}\"*")
-                st.caption("💡 Switch to the **'🎨 In-Text Issue Highlighter'** tab to see these sentences highlighted in blue directly in the article body.")
-
-        st.divider()
-
-        # Section 3: Wordiness & Redundancy Trimmer
-        st.markdown("### ✂️ Wordiness & Redundancy Trimmer")
-        st.caption("Eliminate flab from your copy. Replacing filler words with concise alternatives strengthens your message and boosts readability.")
-
-        if not red_list:
-            st.success("🎉 Clean copy! No common redundant or wordy filler phrases detected.")
-        else:
-            table_rows = [
-                {
-                    "Redundant Phrase": r.get("phrase") or r.get("Redundant Phrase", ""),
-                    "Occurrences": r.get("count") or r.get("Occurrences", 1),
-                    "Concise Alternative": r.get("replacement") or r.get("Simpler Alternative", "")
-                }
-                for r in red_list
-            ]
-            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-            st.caption("💡 Switch to the **'🎨 In-Text Issue Highlighter'** tab to see these phrases highlighted in orange with their one-click replacements.")
-
-        st.divider()
-
-        # Section 4: Deep AI Forensic Verification (Fact-checking, Logic & Contradictions)
-        st.markdown("### 🛡️ AI Deep Forensic & Factual Alignment Scanner")
-        st.caption("Harness DeepSeek AI to perform deep factual verification, uncover internal contradictions, audit grammar/syntax, and detect title drift.")
-
-        ds_key = st.session_state.deepseek_key
-        cache_key = f"{c_data['title']}-{deepseek_model}"
-
-        if not ds_key:
-            st.warning("Enter your DeepSeek API Key in the left sidebar to run deep AI fact and contradiction audits.")
-        else:
-            if st.button("🛡️ Run Deep Forensic & Factual Verification", key=f"btn_verify_{selected_idx}", use_container_width=True):
-                with st.spinner("DeepSeek AI is forensically analyzing article facts, logic, grammar, and headline alignment..."):
-                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ds_key, model=deepseek_model)
-                    if v_res.get("success"):
-                        st.session_state.ai_audit_cache[f"{cache_key}-verification"] = v_res
-                    else:
-                        st.error(v_res.get("error", "Verification failed"))
-
-            if f"{cache_key}-verification" in st.session_state.ai_audit_cache:
-                v_data = st.session_state.ai_audit_cache[f"{cache_key}-verification"]
-                if v_data.get("reasoning"):
-                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
-                        st.write(v_data["reasoning"])
-                st.markdown(v_data["content"])
+        st.markdown("### 💡 Recommended AEO Enhancements to Rank in AI Summaries")
+        st.markdown("""
+        1. **Direct Answer Paragraphs**: Start each major H2 with a concise 30-40 word direct definition or answer before elaborating.
+        2. **Quantified Findings**: Back assertions with percentages (e.g. `+34%`), benchmark numbers, dates, or study years.
+        3. **Structured Quotations**: Use explicit source attribution markers (`"According to a study by..."`).
+        4. **Key Takeaways Table**: Provide summary tables comparing options, pros/cons, or steps.
+        """)
 
     # -------------------------------------------------------------------------
-    # TAB 4: In-Text Issue Highlighter
+    # TAB 4: Competitor Semantic Gap & TF-IDF Heatmap
     # -------------------------------------------------------------------------
     with tabs[3]:
-        st.subheader("🎨 Live In-Text Visual Issue Highlighter")
+        st.subheader("📊 Competitor Semantic Gap & TF-IDF Heatmap")
+        st.caption("Identifies high-frequency terms, missing H2 subtopics, and structural benchmarks from top Google ranking competitors.")
+
+        serp_res = current.get("serp") or st.session_state.serp_cache.get(c_audit["keyword"])
+        comp_gap_key = f"comp_gap_{selected_idx}"
+
+        if comp_gap_key not in st.session_state:
+            st.session_state[comp_gap_key] = None
+
+        if not serp_res or not serp_res.get("competitors"):
+            st.info("ℹ️ To run Competitor Semantic Gap analysis, Google SerpApi results are needed. Enable SerpApi in the sidebar and ensure a focus keyword is set.")
+            if serpapi_key and st.button("🔍 Fetch Live Google SERP Competitors Now", key=f"fetch_serp_gap_{selected_idx}"):
+                with st.spinner("Fetching Google rankings..."):
+                    serp_res = api_integrations.fetch_serp_intelligence(c_audit["keyword"], api_key=serpapi_key)
+                    if serp_res and serp_res.get("success"):
+                        st.session_state.serp_cache[c_audit["keyword"]] = serp_res
+                        current["serp"] = serp_res
+                        st.rerun()
+        else:
+            competitors_list = serp_res.get("competitors", [])[:3]
+            st.write(f"Top competitors identified for **'{c_audit['keyword']}'**:")
+            for idx, comp in enumerate(competitors_list, 1):
+                st.caption(f"#{comp.get('position', idx)} **{comp.get('title', '')}** — `{comp.get('displayed_link', '')}`")
+
+            if st.session_state[comp_gap_key] is None:
+                if st.button("⚡ Crawl Competitors & Generate Semantic Gap Matrix", type="primary", key=f"btn_calc_gap_{selected_idx}"):
+                    with st.spinner("Analyzing competitor content and extracting semantic n-grams..."):
+                        comp_profiles = api_integrations.fetch_competitor_content(competitors_list, max_comp=3)
+                        gap_report = audit_engine.analyze_competitor_semantic_gap(c_data, comp_profiles)
+                        st.session_state[comp_gap_key] = gap_report
+                        st.rerun()
+            else:
+                gap_report = st.session_state[comp_gap_key]
+                if gap_report.get("success"):
+                    bm = gap_report.get("benchmarks", {})
+                    bm_col1, bm_col2, bm_col3 = st.columns(3)
+                    with bm_col1:
+                        st.metric("Word Count Benchmark", f"{bm['word_count']['target']:,} vs {bm['word_count']['competitor_avg']:,}", bm['word_count']['status'])
+                    with bm_col2:
+                        st.metric("Images Benchmark", f"{bm['images']['target']} vs {bm['images']['competitor_avg']}", bm['images']['status'])
+                    with bm_col3:
+                        st.metric("Citations Benchmark", f"{bm['citations']['target']} vs {bm['citations']['competitor_avg']}", bm['citations']['status'])
+
+                    st.divider()
+                    gap_col1, gap_col2 = st.columns(2)
+                    with gap_col1:
+                        st.markdown("#### 🎯 Missing High-Impact Keywords")
+                        st.caption("Used frequently by top 3 rankers, but absent from your post:")
+                        missing_kw = gap_report.get("missing_keywords", [])
+                        if missing_kw:
+                            st.dataframe(pd.DataFrame(missing_kw), use_container_width=True, hide_index=True)
+                        else:
+                            st.success("🎉 Excellent! Your post covers all core semantic terms used by top competitors.")
+
+                    with gap_col2:
+                        st.markdown("#### 📑 Missing Subtopic Themes (Competitor H2s)")
+                        st.caption("Subtopics covered by competitors that your post does not mention:")
+                        missing_topics = gap_report.get("missing_subtopics", [])
+                        if missing_topics:
+                            for mt in missing_topics:
+                                st.markdown(f"- 📌 **{mt}**")
+                        else:
+                            st.success("Your heading structure thoroughly covers competitor subtopics.")
+
+                    if st.button("🔄 Re-crawl & Re-analyze Competitors", key=f"btn_recalc_gap_{selected_idx}"):
+                        st.session_state[comp_gap_key] = None
+                        st.rerun()
+
+    # -------------------------------------------------------------------------
+    # TAB 5: In-Text Highlighter & 1-Click Auto-Patcher
+    # -------------------------------------------------------------------------
+    with tabs[4]:
+        st.subheader("🎨 Live In-Text Visual Issue Highlighter & 1-Click Auto-Patcher")
         st.caption("Inspect your full article with color-coded in-line highlights for run-on sentences, complex jargon, typos, redundancies, passive voice, and keyword density.")
 
         # Interactive Controls
@@ -1005,10 +1059,167 @@ else:
 
         st.markdown(f'<div class="blog-viewer-canvas">{highlighted_body}</div>', unsafe_allow_html=True)
 
+        st.divider()
+
+        # --- 1-Click Safe Editorial Auto-Patcher ---
+        st.markdown("### 🪄 1-Click Safe Editorial Auto-Patcher (Self-Remediation)")
+        st.caption("Automatically patches verified typos, replaces wordy redundancies with punchy alternatives, and simplifies corporate jargon while preserving all original markdown headings, links, and intent.")
+
+        patch_res = audit_engine.apply_safe_simplifications(c_data["clean_text"])
+        total_p = patch_res.get("total_replacements", 0)
+
+        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+        with p_col1:
+            st.metric("Safe Fixes Available", f"{total_p} patches")
+        with p_col2:
+            st.metric("Spelling Corrections", f"{len(patch_res.get('spelling_fixes', []))} words")
+        with p_col3:
+            st.metric("Redundancies Trimmed", f"{len(patch_res.get('redundancy_fixes', []))} phrases")
+        with p_col4:
+            st.metric("Words / Flab Saved", f"{patch_res.get('words_saved', 0)} words")
+
+        if total_p > 0:
+            with st.expander(f"🔍 Inspect All {total_p} Safe Editorial Patches", expanded=False):
+                patch_df = pd.DataFrame(patch_res.get("replacements", []))
+                if not patch_df.empty:
+                    st.dataframe(patch_df, use_container_width=True, hide_index=True)
+
+            diff_col1, diff_col2 = st.columns(2)
+            with diff_col1:
+                st.markdown("#### 📄 Original Text (Excerpt)")
+                st.text_area("Original", value=c_data["clean_text"][:800] + ("..." if len(c_data["clean_text"]) > 800 else ""), height=220, disabled=True, key=f"orig_txt_{selected_idx}")
+            with diff_col2:
+                st.markdown("#### ✨ Patched & Cleaned Text (Excerpt)")
+                st.text_area("Patched", value=patch_res["patched_text"][:800] + ("..." if len(patch_res["patched_text"]) > 800 else ""), height=220, disabled=True, key=f"patch_txt_{selected_idx}")
+
+            st.download_button(
+                label="📥 Download Patched & Cleaned Content (.md)",
+                data=patch_res["patched_text"],
+                file_name=f"cleaned_{c_data['title'][:20].replace(' ', '_')}.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+        else:
+            st.success("🎉 No safe fixes needed! Your copy is free of common typos, wordiness, and corporate jargon.")
+
     # -------------------------------------------------------------------------
-    # TAB 5: Yoast SEO & REST API Studio
+    # TAB 6: Grammar, Clarity & Content-Information Alignment
     # -------------------------------------------------------------------------
-    with tabs[4]:
+    with tabs[5]:
+        st.subheader("🔍 Grammar, Clarity & Content-Information Alignment")
+        st.caption("Comprehensive analysis of linguistic precision, passive voice, wordy redundancies, reading clarity, and title-to-content promise delivery.")
+
+        align = c_audit.get("content_alignment", {})
+        passive = c_audit.get("passive_voice", {})
+        red_list = c_audit.get("redundancies", [])
+        clarity_score = c_audit.get("clarity_score", 0)
+
+        # 4 Core Pillar Metrics
+        gcol1, gcol2, gcol3, gcol4 = st.columns(4)
+        with gcol1:
+            align_score = align.get("score", 0)
+            align_delta = "High Alignment" if align_score >= 80 else ("Moderate Drift" if align_score >= 60 else "Major Mismatch")
+            st.metric("Headline Alignment", f"{align_score}/100", align_delta)
+        with gcol2:
+            clarity_delta = "Crisp & Clear" if clarity_score >= 80 else ("Acceptable" if clarity_score >= 60 else "Dense/Complex")
+            st.metric("Clarity & Flow Index", f"{clarity_score}/100", clarity_delta)
+        with gcol3:
+            pv_pct = passive.get("percentage", 0.0)
+            pv_delta = "Active Voice" if pv_pct <= 10 else ("Acceptable" if pv_pct <= 20 else "Too Passive")
+            st.metric("Passive Voice", f"{pv_pct}%", f"{passive.get('count', 0)} sentences ({pv_delta})", delta_color="inverse" if pv_pct > 15 else "normal")
+        with gcol4:
+            total_red_count = sum(r.get("count", 0) for r in red_list)
+            st.metric("Wordy Redundancies", f"{len(red_list)} phrases", f"{total_red_count} total occurrences")
+
+        st.divider()
+
+        # Section 1: Headline to Content Alignment & Promise Delivery
+        st.markdown("### 🎯 Headline-to-Content Promise Fulfillment")
+        st.caption("Evaluates whether the article actually delivers on what the title promises, verifying H1/H2 topic alignment and listicle/how-to structure.")
+
+        obs = align.get("observations", [])
+        if obs:
+            for ob in obs:
+                if ob.startswith("✅"):
+                    st.success(ob)
+                elif ob.startswith("⚠️"):
+                    st.warning(ob)
+                elif ob.startswith("❌"):
+                    st.error(ob)
+                else:
+                    st.info(ob)
+        else:
+            st.info("Content structure matches title expectations.")
+
+        st.divider()
+
+        # Section 2: Passive Voice Analysis & Improvement
+        st.markdown("### 🗣️ Passive Voice vs Active Voice")
+        st.caption("Active voice makes your writing direct, authoritative, and engaging. Google and readers prefer clear subject-action constructions.")
+
+        if passive.get("count", 0) == 0:
+            st.success("🎉 Excellent! Zero passive voice constructions detected. Your writing is fully active and punchy.")
+        else:
+            if pv_pct > 15:
+                st.warning(f"⚠️ {pv_pct}% of your sentences use passive voice (industry target: under 10%).")
+            else:
+                st.info(f"Passive voice is at {pv_pct}% ({passive.get('count', 0)} sentences), which is within acceptable limits.")
+
+            with st.expander(f"Inspect Detected Passive Voice Sentences ({passive.get('count', 0)} found)", expanded=(pv_pct > 15)):
+                for psent in passive.get("sentences", []):
+                    st.markdown(f"- 🔵 *\"{psent}\"*")
+                st.caption("💡 Switch to the **'🎨 In-Text Highlighter & 1-Click Auto-Patcher'** tab to see these sentences highlighted in blue directly in the article body.")
+
+        st.divider()
+
+        # Section 3: Wordiness & Redundancy Trimmer
+        st.markdown("### ✂️ Wordiness & Redundancy Trimmer")
+        st.caption("Eliminate flab from your copy. Replacing filler words with concise alternatives strengthens your message and boosts readability.")
+
+        if not red_list:
+            st.success("🎉 Clean copy! No common redundant or wordy filler phrases detected.")
+        else:
+            table_rows = [
+                {
+                    "Redundant Phrase": r.get("phrase") or r.get("Redundant Phrase", ""),
+                    "Occurrences": r.get("count") or r.get("Occurrences", 1),
+                    "Concise Alternative": r.get("replacement") or r.get("Simpler Alternative", "")
+                }
+                for r in red_list
+            ]
+            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+            st.caption("💡 Switch to the **'🎨 In-Text Highlighter & 1-Click Auto-Patcher'** tab to see these phrases highlighted in orange with their one-click replacements.")
+
+        st.divider()
+
+        # Section 4: Deep AI Forensic Verification (Fact-checking, Logic & Contradictions)
+        st.markdown("### 🛡️ AI Deep Forensic & Factual Alignment Scanner")
+        st.caption("Harness Multi-LLM AI to perform deep factual verification, uncover internal contradictions, audit grammar/syntax, and detect title drift.")
+
+        cache_key = f"{c_data['title']}-{ai_model}"
+
+        if not ai_key:
+            st.warning(f"Enter your {ai_provider} API Key in the left sidebar to run deep AI fact and contradiction audits.")
+        else:
+            if st.button(f"🛡️ Run Deep Forensic & Factual Verification ({ai_provider})", key=f"btn_verify_{selected_idx}", use_container_width=True):
+                with st.spinner(f"{ai_provider} AI is forensically analyzing article facts, logic, grammar, and headline alignment..."):
+                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ai_key, model=ai_model, provider=selected_provider_slug)
+                    if v_res.get("success"):
+                        st.session_state.ai_audit_cache[f"{cache_key}-verification"] = v_res
+                    else:
+                        st.error(v_res.get("error", "Verification failed"))
+
+            if f"{cache_key}-verification" in st.session_state.ai_audit_cache:
+                v_data = st.session_state.ai_audit_cache[f"{cache_key}-verification"]
+                if v_data.get("reasoning"):
+                    with st.expander(f"💭 View {ai_provider} Reasoning Process (CoT)"):
+                        st.write(v_data["reasoning"])
+                st.markdown(v_data["content"])
+
+    # -------------------------------------------------------------------------
+    # TAB 7: Yoast SEO & REST API Studio
+    # -------------------------------------------------------------------------
+    with tabs[6]:
         st.subheader("🚦 Yoast SEO Traffic Lights & REST API Studio")
         st.caption("Official 14 Focus Keyphrase Criteria, 7 Readability Criteria, and direct integration with WordPress Yoast REST API endpoints.")
 
@@ -1260,9 +1471,185 @@ else:
                             st.error(up_res.get("error"))
 
     # -------------------------------------------------------------------------
-    # TAB 6: Google SERP Intelligence (SerpApi)
+    # TAB 8: Sitemap Discovery & Link Sentinel
     # -------------------------------------------------------------------------
-    with tabs[5]:
+    with tabs[7]:
+        st.subheader("🕷️ Site-Wide XML Sitemap Discovery & Link Sentinel")
+        st.caption("Deep sitemap parsing, recursive sitemap index resolution, concurrent broken link checks (404s, 301s, mixed HTTP content), and CMS platform discovery.")
+
+        sm_col1, sm_col2 = st.columns([3, 1])
+        with sm_col1:
+            sitemap_target = st.text_input(
+                "Target Domain or Sitemap URL",
+                value=c_data.get("url", ""),
+                placeholder="https://example.com/sitemap.xml or https://example.com",
+                key=f"sm_target_{selected_idx}"
+            )
+        with sm_col2:
+            max_sm_urls = st.number_input("Max URLs to fetch", min_value=10, max_value=500, value=100, step=25, key=f"sm_max_{selected_idx}")
+
+        sm_cache_key = f"sitemap_{sitemap_target}"
+        if st.button("🔎 Discover & Parse XML Sitemap", key=f"btn_sm_{selected_idx}", use_container_width=True):
+            with st.spinner("Discovering and parsing XML sitemap..."):
+                sm_res = crawler.discover_and_parse_sitemap(sitemap_target, max_urls=max_sm_urls)
+                st.session_state[sm_cache_key] = sm_res
+
+        if sm_cache_key in st.session_state:
+            sm_res = st.session_state[sm_cache_key]
+            if sm_res.get("success"):
+                st.success(f"Discovered **{sm_res['total_found']}** URL(s) from sitemap: `{sm_res['sitemap_url']}`")
+                if sm_res.get("sitemaps_indexed"):
+                    with st.expander(f"Indexed Child Sitemaps ({len(sm_res['sitemaps_indexed'])})"):
+                        for csm in sm_res["sitemaps_indexed"]:
+                            st.write(f"- `{csm}`")
+
+                sm_df = pd.DataFrame(sm_res["urls"])
+                st.dataframe(sm_df, use_container_width=True, hide_index=True)
+            else:
+                st.error(sm_res.get("error", "Failed to discover XML sitemap"))
+
+        st.divider()
+
+        # Section 2: Concurrent Broken Link Sentinel
+        st.markdown("### 🔗 Concurrent Dead Link Sentinel (404s, Redirects, Mixed Content)")
+        st.caption("Concurrently verifies every outbound and internal link on this page to prevent SEO crawl waste, broken user journeys, and Google ranking penalties.")
+
+        page_links = c_data.get("links", [])
+        st.write(f"Total links on this page: **{len(page_links)}**")
+
+        link_cache_key = f"link_health_{c_data.get('url')}"
+        if st.button("🛡️ Audit Link Health for Current Page", key=f"btn_audit_links_{selected_idx}", use_container_width=True):
+            with st.spinner(f"Auditing links concurrently (up to 30 URLs)..."):
+                lh_res = crawler.audit_links_health(page_links, base_url=c_data.get("url"), max_check=30)
+                st.session_state[link_cache_key] = lh_res
+
+        if link_cache_key in st.session_state:
+            lh = st.session_state[link_cache_key]
+            lh_c1, lh_c2, lh_c3, lh_c4, lh_c5 = st.columns(5)
+            with lh_c1:
+                st.metric("Total Checked", lh.get("total_checked", 0))
+            with lh_c2:
+                st.metric("Healthy (200 OK)", lh.get("healthy_count", 0))
+            with lh_c3:
+                st.metric("Broken (404/Error)", lh.get("broken_count", 0), delta_color="inverse" if lh.get("broken_count", 0) > 0 else "normal")
+            with lh_c4:
+                st.metric("Redirects (301/302)", lh.get("redirect_count", 0))
+            with lh_c5:
+                st.metric("Mixed Content (HTTP)", lh.get("mixed_content_count", 0), delta_color="inverse" if lh.get("mixed_content_count", 0) > 0 else "normal")
+
+            if lh.get("broken_links"):
+                st.markdown("#### 🚨 Broken Links Detected:")
+                b_df = pd.DataFrame(lh["broken_links"])
+                st.dataframe(b_df, use_container_width=True, hide_index=True)
+
+            if lh.get("redirects"):
+                with st.expander(f"⚠️ Redirected Links ({len(lh['redirects'])})"):
+                    st.dataframe(pd.DataFrame(lh["redirects"]), use_container_width=True, hide_index=True)
+
+            if lh.get("mixed_content"):
+                with st.expander(f"⚠️ Insecure HTTP Mixed Content Links ({len(lh['mixed_content'])})"):
+                    st.dataframe(pd.DataFrame(lh["mixed_content"]), use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # Section 3: CMS & SEO Plugin Detector
+        st.markdown("### 🏷️ CMS & SEO Plugin Architecture Detection")
+        st.caption("Identifies the underlying content management platform and installed SEO plugins.")
+        cms_cache_key = f"cms_detect_{c_data.get('url')}"
+
+        if st.button("🔎 Detect CMS Platform & Active Plugins", key=f"btn_cms_{selected_idx}"):
+            with st.spinner("Analyzing site generator, headers, and meta signatures..."):
+                cms_info = api_integrations.detect_cms_platform(c_data.get("url"), html_content=c_data.get("raw_html", ""))
+                st.session_state[cms_cache_key] = cms_info
+
+        if cms_cache_key in st.session_state:
+            cms_info = st.session_state[cms_cache_key]
+            cc1, cc2, cc3 = st.columns(3)
+            with cc1:
+                st.metric("CMS Platform", cms_info.get("platform", "Unknown"))
+            with cc2:
+                st.metric("Confidence", f"{cms_info.get('confidence', 0)}%")
+            with cc3:
+                plugins = cms_info.get("seo_plugins", [])
+                st.metric("SEO Plugins", ", ".join(plugins) if plugins else "None Detected")
+            st.info(f"**Diagnostic Evidence:** {cms_info.get('evidence', 'No specific signatures identified')}")
+
+    # -------------------------------------------------------------------------
+    # TAB 9: Audit History & Score Velocity Progression
+    # -------------------------------------------------------------------------
+    with tabs[8]:
+        st.subheader("📈 Historical SEO Velocity & Score Progression")
+        st.caption("Persistent SQLite tracking (`blogguard_history.db`) records every audit iteration, score delta, and AEO velocity over time.")
+
+        # Current URL velocity tracking
+        curr_url = c_data.get("url", "")
+        vel_data = db_history.get_url_velocity(curr_url)
+
+        if vel_data.get("total_audits", 0) > 1:
+            v1, v2, v3, v4 = st.columns(4)
+            delta_score = vel_data.get("score_delta", 0)
+            delta_str = f"+{delta_score}" if delta_score > 0 else f"{delta_score}"
+            with v1:
+                st.metric("Total Revisions Audited", vel_data.get("total_audits", 0))
+            with v2:
+                st.metric("Latest Score", f"{vel_data.get('latest_score', 0)}/100", f"{delta_str} pts vs baseline")
+            with v3:
+                st.metric("First Recorded Score", f"{vel_data.get('first_score', 0)}/100")
+            with v4:
+                st.metric("AEO Readiness Score", f"{vel_data.get('latest_aeo', 0)}/100")
+
+            # Progression Chart
+            st.markdown("#### 📊 Score Velocity Progression Over Time")
+            history_rows = vel_data.get("history", [])
+            if history_rows:
+                chart_df = pd.DataFrame([
+                    {
+                        "Timestamp": h["timestamp"],
+                        "Overall Score": h["overall_score"],
+                        "AEO Score": h["aeo_score"] or 0,
+                    }
+                    for h in history_rows
+                ])
+                st.line_chart(chart_df.set_index("Timestamp"), use_container_width=True)
+        else:
+            st.info("ℹ️ Only 1 audit recorded for this URL so far. Run subsequent audits or re-audit after making edits to view score progression trends.")
+
+        st.divider()
+
+        # Complete Database Audit Log
+        st.markdown("### 🗄️ All Historical Audits Database (`blogguard_history.db`)")
+        all_snaps = db_history.get_audit_history(limit=50)
+
+        if all_snaps:
+            snap_df = pd.DataFrame([
+                {
+                    "ID": s["id"],
+                    "Timestamp": s["timestamp"],
+                    "URL": s["url"],
+                    "Title": s["title"][:40] if s["title"] else "",
+                    "Keyword": s["keyword"],
+                    "Score": s["overall_score"],
+                    "AEO": s["aeo_score"],
+                    "Words": s["word_count"],
+                    "Flesch": round(s["flesch_reading_ease"], 1) if s["flesch_reading_ease"] else 0,
+                }
+                for s in all_snaps
+            ])
+            st.dataframe(snap_df, use_container_width=True, hide_index=True)
+
+            del_col1, del_col2 = st.columns([3, 1])
+            with del_col2:
+                if st.button("🗑️ Clear Entire History DB", key=f"btn_clear_hist_{selected_idx}", help="Reset the local SQLite audit history"):
+                    db_history.clear_all_history()
+                    st.success("Database cleared!")
+                    st.rerun()
+        else:
+            st.write("No historical snapshots saved yet.")
+
+    # -------------------------------------------------------------------------
+    # TAB 10: Google SERP Intelligence (SerpApi)
+    # -------------------------------------------------------------------------
+    with tabs[9]:
         st.subheader("🔍 Google SERP Live Intelligence")
         kw = c_audit["keyword"]
         serp = current.get("serp") or st.session_state.serp_cache.get(kw)
@@ -1307,14 +1694,14 @@ else:
                 st.info("Click 'Fetch Live Google SERP' above to run live competitive intelligence.")
 
     # -------------------------------------------------------------------------
-    # TAB 7: DeepSeek AI Copilot
+    # TAB 11: Multi-LLM AI Copilot
     # -------------------------------------------------------------------------
-    with tabs[6]:
-        st.subheader("🧠 DeepSeek AI Editorial Director")
-        ds_key = st.session_state.deepseek_key
+    with tabs[10]:
+        st.subheader(f"🧠 {ai_provider} AI Editorial Director")
+        st.caption(f"Active AI Provider: **{ai_provider}** | Model: `{ai_model}`. Switch providers and models anytime in the left sidebar.")
 
-        if not ds_key:
-            st.warning("Please enter your DeepSeek API Key in the left sidebar to unlock the AI Copilot.")
+        if not ai_key:
+            st.warning(f"Please enter your {ai_provider} API Key in the left sidebar to unlock the AI Copilot.")
         else:
             ai_col1, ai_col2, ai_col3, ai_col4, ai_col5 = st.columns(5)
             with ai_col1:
@@ -1328,45 +1715,45 @@ else:
             with ai_col5:
                 run_ai_verify_btn = st.button("🛡️ Content & Fact Audit", use_container_width=True)
 
-            cache_key = f"{c_data['title']}-{deepseek_model}"
+            cache_key = f"{c_data['title']}-{ai_model}"
 
             if run_ai_audit_btn:
-                with st.spinner(f"Querying DeepSeek ({deepseek_model})..."):
-                    ai_res = api_integrations.generate_deepseek_audit(c_data, c_audit, api_key=ds_key, model=deepseek_model)
+                with st.spinner(f"Querying {ai_provider} ({ai_model})..."):
+                    ai_res = api_integrations.generate_deepseek_audit(c_data, c_audit, api_key=ai_key, model=ai_model, provider=selected_provider_slug)
                     if ai_res.get("success"):
                         st.session_state.ai_audit_cache[f"{cache_key}-audit"] = ai_res
                     else:
                         st.error(ai_res.get("error"))
 
             if run_ai_faq_btn:
-                with st.spinner(f"Generating JSON-LD Schema with DeepSeek ({deepseek_model})..."):
+                with st.spinner(f"Generating JSON-LD Schema with {ai_provider} ({ai_model})..."):
                     paa_q = current.get("serp", {}).get("people_also_ask", []) if current.get("serp") else []
-                    faq_res = api_integrations.generate_ai_faq_schema(c_data, paa_q, api_key=ds_key, model=deepseek_model)
+                    faq_res = api_integrations.generate_ai_faq_schema(c_data, paa_q, api_key=ai_key, model=ai_model, provider=selected_provider_slug)
                     if faq_res.get("success"):
                         st.session_state.ai_audit_cache[f"{cache_key}-faq"] = faq_res
                     else:
                         st.error(faq_res.get("error"))
 
             if run_ai_titles_btn:
-                with st.spinner("Generating CTR optimized titles..."):
+                with st.spinner(f"Generating CTR optimized titles with {ai_provider}..."):
                     t_prompt = f"Provide 5 high-converting, high-CTR SEO title tags and 3 compelling meta descriptions for an article titled '{c_data['title']}' targeting keyword '{c_audit['keyword']}'."
-                    t_res = api_integrations.query_deepseek_copilot(t_prompt, api_key=ds_key, model=deepseek_model)
+                    t_res = api_integrations.query_ai_copilot(t_prompt, provider=selected_provider_slug, api_key=ai_key, model=ai_model)
                     if t_res.get("success"):
                         st.session_state.ai_audit_cache[f"{cache_key}-titles"] = t_res
                     else:
                         st.error(t_res.get("error"))
 
             if run_ai_read_btn:
-                with st.spinner("Generating conversational readability rewrite (Flesch 65–75)..."):
-                    r_res = api_integrations.rewrite_for_readability(c_data, api_key=ds_key, model=deepseek_model)
+                with st.spinner(f"Generating conversational readability rewrite with {ai_provider} (Flesch 65–75)..."):
+                    r_res = api_integrations.rewrite_for_readability(c_data, api_key=ai_key, model=ai_model, provider=selected_provider_slug)
                     if r_res.get("success"):
                         st.session_state.ai_audit_cache[f"{cache_key}-readability"] = r_res
                     else:
                         st.error(r_res.get("error"))
 
             if run_ai_verify_btn:
-                with st.spinner("Forensically verifying content, facts, and alignment..."):
-                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ds_key, model=deepseek_model)
+                with st.spinner(f"Forensically verifying content, facts, and alignment with {ai_provider}..."):
+                    v_res = api_integrations.verify_content_and_facts(c_data, api_key=ai_key, model=ai_model, provider=selected_provider_slug)
                     if v_res.get("success"):
                         st.session_state.ai_audit_cache[f"{cache_key}-verification"] = v_res
                     else:
@@ -1374,10 +1761,10 @@ else:
 
             # Display cached AI outputs
             if f"{cache_key}-audit" in st.session_state.ai_audit_cache:
-                st.markdown("### 📋 DeepSeek Strategic Editorial Verdict")
+                st.markdown(f"### 📋 {ai_provider} Strategic Editorial Verdict")
                 res = st.session_state.ai_audit_cache[f"{cache_key}-audit"]
                 if res.get("reasoning"):
-                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                    with st.expander(f"💭 View {ai_provider} Reasoning Process (CoT)"):
                         st.write(res["reasoning"])
                 st.markdown(res["content"])
 
@@ -1390,25 +1777,25 @@ else:
                 st.markdown(st.session_state.ai_audit_cache[f"{cache_key}-titles"]["content"])
 
             if f"{cache_key}-readability" in st.session_state.ai_audit_cache:
-                st.markdown("### 🪄 DeepSeek Conversational Readability Rewrite (Flesch 65–75)")
+                st.markdown(f"### 🪄 {ai_provider} Conversational Readability Rewrite (Flesch 65–75)")
                 res = st.session_state.ai_audit_cache[f"{cache_key}-readability"]
                 if res.get("reasoning"):
-                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                    with st.expander(f"💭 View {ai_provider} Reasoning Process (CoT)"):
                         st.write(res["reasoning"])
                 st.markdown(res["content"])
 
             if f"{cache_key}-verification" in st.session_state.ai_audit_cache:
-                st.markdown("### 🛡️ Deep Forensic & Factual Alignment Report")
+                st.markdown(f"### 🛡️ Deep Forensic & Factual Alignment Report ({ai_provider})")
                 res = st.session_state.ai_audit_cache[f"{cache_key}-verification"]
                 if res.get("reasoning"):
-                    with st.expander("💭 View DeepSeek Reasoning Process (CoT)"):
+                    with st.expander(f"💭 View {ai_provider} Reasoning Process (CoT)"):
                         st.write(res["reasoning"])
                 st.markdown(res["content"])
 
     # -------------------------------------------------------------------------
-    # TAB 8: Core Web Vitals & PageSpeed
+    # TAB 12: Core Web Vitals & PageSpeed
     # -------------------------------------------------------------------------
-    with tabs[7]:
+    with tabs[11]:
         st.subheader("⚡ Google Core Web Vitals & Mobile Performance")
         ps = current.get("pagespeed") or st.session_state.pagespeed_cache.get(c_data["url"])
 
@@ -1442,9 +1829,9 @@ else:
             st.info("Core Web Vitals check evaluates real-world mobile UX metrics (LCP, CLS, FCP) directly via Google's Lighthouse engine.")
 
     # -------------------------------------------------------------------------
-    # TAB 9: SERP & Social Preview
+    # TAB 13: SERP & Social Preview
     # -------------------------------------------------------------------------
-    with tabs[8]:
+    with tabs[12]:
         st.subheader("📱 Live SERP & Social Sharing Simulators")
         serp_title = c_data["title"][:60]
         serp_url = c_data["url"]
@@ -1473,9 +1860,9 @@ else:
         """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # TAB 10: Content Hierarchy
+    # TAB 14: Content Hierarchy
     # -------------------------------------------------------------------------
-    with tabs[9]:
+    with tabs[13]:
         st.subheader("📑 Document Heading Hierarchy")
         st.write(f"Total Headings: **{len(c_data['headings'])}** (H1: {c_audit['h1_count']}, H2: {c_audit['h2_count']}, H3: {c_audit['h3_count']})")
 
@@ -1495,9 +1882,9 @@ else:
                 st.write(f"- ({ls['word_count']} words): *\"{ls['sentence']}\"*")
 
     # -------------------------------------------------------------------------
-    # TAB 11: Media & Links
+    # TAB 15: Media & Links
     # -------------------------------------------------------------------------
-    with tabs[10]:
+    with tabs[14]:
         st.subheader("🖼️ Image Alt Text & Format Audit")
         if c_data["images"]:
             img_df = pd.DataFrame(c_data["images"])[["src", "alt", "has_alt", "format", "loading"]]
@@ -1521,9 +1908,9 @@ else:
                 st.write(f"- [{cit['text'] or cit['href']}]({cit['href']})")
 
     # -------------------------------------------------------------------------
-    # TAB 12: Checklist & Export
+    # TAB 16: Checklist & Export
     # -------------------------------------------------------------------------
-    with tabs[11]:
+    with tabs[15]:
         st.subheader("📝 Pre-Publish Editorial Sign-off")
         chk_items = [
             "Primary keyword present in Title, H1 and First 100 Words",
@@ -1555,7 +1942,12 @@ else:
             )
 
         with dcol2:
-            html_report = export_helper.generate_html_report(c_data, c_audit, serp_data=current.get("serp"))
+            html_report = export_helper.generate_html_report(
+                c_data,
+                c_audit,
+                serp_data=current.get("serp"),
+                competitor_gap=c_audit.get("competitor_gap")
+            )
             st.download_button(
                 label="📑 Download Executive HTML/PDF Report",
                 data=html_report,
